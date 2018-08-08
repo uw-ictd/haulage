@@ -199,62 +199,6 @@ func main() {
         log.Fatal(err)
     }
 
-    trx, err := db.Begin()
-    if err!= nil {
-        // TODO(matt9j) put a more verbose log message here
-        log.Fatal(err)
-    }
-
-    statement, err := trx.Prepare("select imsi from static_ips where ip=?")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    var imsi int64
-    err = statement.QueryRow("192.168.151.2").Scan(&imsi)
-    if err != nil {
-        // TODO(matt9j) Handle no row returned b/c the IP is not known
-        log.Fatal(err)
-    }
-
-    statement2, err := trx.Prepare("SELECT raw_down, raw_up, data_balance, balance, bridged, enabled FROM customers WHERE imsi =? ")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    var (
-        raw_down int64
-        raw_up int64
-        data_balance int64
-        balance float32
-        bridged bool
-        enabled bool
-    )
-
-    err = statement2.QueryRow(imsi).Scan(&raw_down, &raw_up, &data_balance, &balance, &bridged, &enabled)
-    if err!= nil {
-        // TODO(matt9j) put a more verbose log message here
-        log.Fatal(err)
-    }
-
-    log.Info(imsi)
-    log.Info(raw_up, raw_down)
-
-    trx.Exec("UPDATE customers SET raw_down = ?, raw_up = ?, data_balance = ?, enabled = ?, bridged = ? WHERE imsi = ?",
-        raw_down + 10, raw_up + 10, data_balance - 10, enabled, bridged, imsi)
-
-    trx.Commit()
-
-    var rawResultUp int64
-    var rawResultDown int64
-    err = db.QueryRow("SELECT raw_down, raw_up FROM customers WHERE imsi =? ", imsi).Scan(&rawResultDown, &rawResultUp)
-    if err!= nil {
-        // TODO(matt9j) put a more verbose log message here
-        log.Fatal(err)
-    }
-
-    log.Warn(rawResultUp, rawResultDown)
-
     var processingGroup sync.WaitGroup
 
     // Skip directly to decoding IPv4 on the tunneled packets.
