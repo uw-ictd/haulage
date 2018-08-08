@@ -69,12 +69,12 @@ func classifyPacket(packet gopacket.Packet, wg *sync.WaitGroup) {
 }
 
 func sendToFlowHandler(event flowEvent, wg *sync.WaitGroup) {
-    if flowChannel, ok := flowHandlers.Load(event.flow); ok {
+    if flowChannel, ok := flowHandlers.Load(event.flow.FastHash()); ok {
         flowChannel.(chan flowEvent) <- event
     } else {
         // Attempt to allocate a new flow channel atomically. This can race between the check above and when the channel
         // is created.
-        newChannel, existed := flowHandlers.LoadOrStore(event.flow, make(chan flowEvent))
+        newChannel, existed := flowHandlers.LoadOrStore(event.flow.FastHash(), make(chan flowEvent))
         if !existed {
             wg.Add(1)
             go flowHandler(newChannel.(chan flowEvent), event.flow, wg)
@@ -98,9 +98,7 @@ func flowHandler(ch chan flowEvent, flow gopacket.Flow, wg *sync.WaitGroup) {
         case event := <-ch:
             if event.flow.Src() == endA {
                 bytesAB += event.amount
-                log.Info(event.flow.Src(), event.flow.Dst())
             } else {
-                log.Info("else case")
                 bytesBA += event.amount
             }
             generateUsageEvents(event.flow, event.amount, wg)
