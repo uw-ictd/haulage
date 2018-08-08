@@ -8,11 +8,14 @@ import (
     "github.com/google/gopacket/pcap"
     "sync"
     "net"
+    _ "github.com/go-sql-driver/mysql"
+    "database/sql"
 )
 
 const FLOW_LOG_INTERVAL = 5 * time.Second
-type FlowType int
+const USER_LOG_INTERVAL = 10 * time.Second
 
+type FlowType int
 const (
     LOCAL_UP FlowType = 0
     LOCAL_DOWN FlowType = 1
@@ -185,20 +188,131 @@ func sendToUserAggregator(user gopacket.Endpoint, event usageEvent, wg *sync.Wai
 }
 
 func aggregateUser(ch chan usageEvent, user gopacket.Endpoint, wg *sync.WaitGroup) {
+    defer wg.Done()
+    defer close(ch)
+    defer userAggregators.Delete(user)
+    localUpBytes := 0
+    localDownBytes := 0
+    extUpBytes := 0
+    extDownBytes := 0
+    logTime := time.After(USER_LOG_INTERVAL)
 
+    for {
+        select {
+        case newEvent := <-ch:
+            switch newEvent.trafficType {
+            case LOCAL_UP:
+                localUpBytes += newEvent.amount
+            case LOCAL_DOWN:
+                localDownBytes += newEvent.amount
+            case EXT_UP:
+                extUpBytes += newEvent.amount
+            case EXT_DOWN:
+                extDownBytes += newEvent.amount
+            }
+        case <-logTime:
+            logTime = time.After(USER_LOG_INTERVAL)
+            if (localUpBytes == 0) && (localDownBytes == 0) && (extUpBytes == 0) && (extDownBytes == 0) {
+                // Reclaim handlers and channels from users that have finished.
+                log.WithField("User", user).Info("Reclaiming")
+                return
+            }
+            // TODO(matt9j) Report the user statistics to the database for long term logging
+            log.WithField("User", user).Info(localUpBytes, localDownBytes, extUpBytes, extDownBytes)
+            localUpBytes = 0
+            localDownBytes = 0
+            extUpBytes = 0
+            extDownBytes = 0
+        }
+    }
 }
 
 func main() {
     // Open device
-    //handle, err = pcap.OpenLive(device, snapshot_len, promiscuous, timeout)
-    var processingGroup sync.WaitGroup
-
+    log.Info("Starting haulage")
+    //handle, err = pcap.OpenLive(device, snapshot_len, promiscuous, snapshotTimeout)
     // Open file
-    handle, err = pcap.OpenOffline("testdata/small.pcap")
+    handle, err = pcap.OpenOffline("testdata/testDump.pcap")
     if err != nil {
         log.Fatal(err)
     }
     defer handle.Close()
+
+    db, err := sql.Open("mysql", "colte:horse@/colte_db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer db.Close()
+
+    err = db.Ping()
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    trx, err := db.Begin()
+    if err!= nil {
+        // TODO(matt9j) put a more verbose log message here
+        log.Fatal(err)
+    }
+
+    statement, err := trx.Prepare("select imsi from static_ips where ip=?")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    var imsi int64
+    err = statement.QueryRow("192.168.151.2").Scan(&imsi)
+    if err != nil {
+        // TODO(matt9j) Handle no row returned b/c the IP is not known
+        log.Fatal(err)
+    }
+
+    statement2, err := trx.Prepare("SELECT raw_down, raw_up, data_balance, balance, bridged, enabled FROM customers WHERE imsi =? ")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    var (
+        raw_down int64
+        raw_up int64
+        data_balance int64
+        balance float32
+        bridged bool
+        enabled bool
+    )
+
+    err = statement2.QueryRow(imsi).Scan(&raw_down, &raw_up, &data_balance, &balance, &bridged, &enabled)
+    if err!= nil {
+        // TODO(matt9j) put a more verbose log message here
+        log.Fatal(err)
+    }
+
+    log.Info(imsi)
+    log.Info(raw_up, raw_down)
+
+    trx.Exec("UPDATE customers SET raw_down = ?, raw_up = ?, data_balance = ?, enabled = ?, bridged = ? WHERE imsi = ?",
+        raw_down + 10, raw_up + 10, data_balance - 10, enabled, bridged, imsi)
+
+    trx.Commit()
+
+    var rawResultUp int64
+    var rawResultDown int64
+    err = db.QueryRow("SELECT raw_down, raw_up FROM customers WHERE imsi =? ", imsi).Scan(&rawResultDown, &rawResultUp)
+    if err!= nil {
+        // TODO(matt9j) put a more verbose log message here
+        log.Fatal(err)
+    }
+
+    log.Warn(rawResultUp, rawResultDown)
+
+    var processingGroup sync.WaitGroup
+
+    // Skip directly to decoding IPv4 on the tunneled packets.
+    // TODO(matt9j) Make this smarter to use ip4 or ip6 based on the tunnel address and type?
+    layers.LinkTypeMetadata[12] = layers.EnumMetadata{
+        DecodeWith: layers.LayerTypeIPv4,
+        Name: "tun",
+    }
 
     packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
     for packet := range packetSource.Packets() {
