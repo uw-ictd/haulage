@@ -11,9 +11,9 @@ import (
 )
 
 type UseEvent struct {
-    userAddress gopacket.Endpoint
-    bytesUp int64
-    bytesDown int64
+    UserAddress gopacket.Endpoint
+    BytesUp int64
+    BytesDown int64
 }
 
 type UserStatus struct {
@@ -24,9 +24,9 @@ type UserStatus struct {
 
 func LogUsage(db *sql.DB, event UseEvent) (UserStatus, error) {
     // TODO(matt9j) Validate what actually happens when an address can't be parsed. Is a zero address returned? Do we panic?
-    ip := net.ParseIP(event.userAddress.String())
+    ip := net.ParseIP(event.UserAddress.String())
     if ip == nil {
-        log.WithField("Endpoint", event.userAddress).Error("Unable to parse user IP")
+        log.WithField("Endpoint", event.UserAddress).Error("Unable to parse user IP")
     }
 
     // Attempt to commit an update 3 times, barring other more serious errors.
@@ -65,12 +65,13 @@ func LogUsage(db *sql.DB, event UseEvent) (UserStatus, error) {
         }
 
         // Business logic accounting for the event.
-        rawDown += event.bytesDown
-        rawUp += event.bytesUp
-        dataBalance -= (event.bytesUp + event.bytesDown)
+        rawDown += event.BytesDown
+        rawUp += event.BytesUp
+        dataBalance -= event.BytesUp
+        dataBalance -= event.BytesDown
 
         _, err = trx.Exec(
-            "UPDATE customers SET rawDown=?, raw_up=?, data_balance=?, enabled=?, bridged=? WHERE imsi=?",
+            "UPDATE customers SET raw_down=?, raw_up=?, data_balance=?, enabled=?, bridged=? WHERE imsi=?",
             rawDown, rawUp, dataBalance, enabled, bridged, imsi)
         if err != nil {
             log.WithField("imsi", imsi).WithError(err).Error("Unable to execute update customer data")
@@ -82,9 +83,9 @@ func LogUsage(db *sql.DB, event UseEvent) (UserStatus, error) {
         if err != nil {
             log.WithField("Attempt", i).WithField("imsi", imsi).WithError(err).Warn("Unable to commit")
         } else {
-            return UserStatus{event.userAddress, dataBalance, balance}, err
+            return UserStatus{event.UserAddress, dataBalance, balance}, err
         }
     }
-    log.WithField("User", event.userAddress).Error("Giving up committing billing update!")
+    log.WithField("User", event.UserAddress).Error("Giving up committing billing update!")
     return UserStatus{}, errors.New("data loss: unable to commit")
 }

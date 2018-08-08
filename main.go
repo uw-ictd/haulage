@@ -10,6 +10,7 @@ import (
     _ "github.com/go-sql-driver/mysql"
     "database/sql"
     "github.com/uw-ictd/haulage/internal/classify"
+    "github.com/uw-ictd/haulage/internal/storage"
 )
 
 const FLOW_LOG_INTERVAL = 5 * time.Second
@@ -37,6 +38,7 @@ var (
     handle          *pcap.Handle
     flowHandlers    = new(sync.Map)
     userAggregators = new(sync.Map)
+    db              *sql.DB
 )
 
 // Parse the network layer of the packet and push it to the appropriate channel for each flow.
@@ -141,24 +143,25 @@ func aggregateUser(ch chan usageEvent, user gopacket.Endpoint, wg *sync.WaitGrou
     defer wg.Done()
     defer close(ch)
     defer userAggregators.Delete(user)
-    localUpBytes := 0
-    localDownBytes := 0
-    extUpBytes := 0
-    extDownBytes := 0
+    localUpBytes := int64(0)
+    localDownBytes := int64(0)
+    extUpBytes := int64(0)
+    extDownBytes := int64(0)
     logTime := time.After(USER_LOG_INTERVAL)
 
     for {
         select {
         case newEvent := <-ch:
+            delta := int64(newEvent.amount)
             switch newEvent.trafficType {
             case LOCAL_UP:
-                localUpBytes += newEvent.amount
+                localUpBytes += delta
             case LOCAL_DOWN:
-                localDownBytes += newEvent.amount
+                localDownBytes += delta
             case EXT_UP:
-                extUpBytes += newEvent.amount
+                extUpBytes += delta
             case EXT_DOWN:
-                extDownBytes += newEvent.amount
+                extDownBytes += delta
             }
         case <-logTime:
             logTime = time.After(USER_LOG_INTERVAL)
@@ -167,8 +170,9 @@ func aggregateUser(ch chan usageEvent, user gopacket.Endpoint, wg *sync.WaitGrou
                 log.WithField("User", user).Info("Reclaiming")
                 return
             }
-            // TODO(matt9j) Report the user statistics to the database for long term logging
-            log.WithField("User", user).Info(localUpBytes, localDownBytes, extUpBytes, extDownBytes)
+            log.WithField("User", user).Debug(localUpBytes, localDownBytes, extUpBytes, extDownBytes)
+            // TODO(matt9j) Consider logging local traffic just for analysis purposes.
+            storage.LogUsage(db, storage.UseEvent{user, extUpBytes, extDownBytes})
             localUpBytes = 0
             localDownBytes = 0
             extUpBytes = 0
@@ -182,13 +186,13 @@ func main() {
     log.Info("Starting haulage")
     //handle, err = pcap.OpenLive(device, snapshot_len, promiscuous, snapshotTimeout)
     // Open file
-    handle, err = pcap.OpenOffline("testdata/testDump.pcap")
+    handle, err = pcap.OpenOffline("testdata/small.pcap")
     if err != nil {
         log.Fatal(err)
     }
     defer handle.Close()
 
-    db, err := sql.Open("mysql", "colte:horse@/colte_db")
+    db, err = sql.Open("mysql", "colte:horse@/colte_db")
     if err != nil {
         log.Fatal(err)
     }
