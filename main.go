@@ -66,6 +66,11 @@ func isUser(endpoint gopacket.Endpoint) bool {
         return false
     }
 
+    // Exclude specific IPs assigned to our network hardware in the user subnet.
+    if ip.Equal(net.ParseIP("192.168.151.1")) {
+        return false
+    }
+
     _, userBlock, _ := net.ParseCIDR("192.168.151.0/24")
 
     return userBlock.Contains(ip)
@@ -83,15 +88,15 @@ func isLocal(endpoint gopacket.Endpoint) bool {
 
 // Parse the network layer of the packet and push it to the appropriate channel for each flow.
 func classifyPacket(packet gopacket.Packet, wg *sync.WaitGroup) {
-    if packet.LinkLayer().LayerType() != layers.LayerTypeEthernet {
+    // Only support ethernet link layers.
+    if (packet.LinkLayer() != nil) && (packet.LinkLayer().LayerType() != layers.LayerTypeEthernet){
         log.WithField("LayerType", packet.LinkLayer().LayerType()).Info("Non-ethernet is not supported")
         return
     }
 
     if packet.NetworkLayer() == nil {
-        ethernetPacket, _ := packet.LinkLayer().(*layers.Ethernet)
-        log.WithField("EthernetType", ethernetPacket.EthernetType).Info(
-            "Packet is link layer only and will not be counted")
+        log.WithField("Packet", packet).Info(
+            "Packet has no network layer and will not be counted")
         return
     }
 
@@ -123,29 +128,47 @@ func flowHandler(ch chan int, flow gopacket.Flow, wg *sync.WaitGroup) {
     defer close(ch)
     defer flowHandlers.Delete(flow)
     byteCount := 0
+    logTime := time.After(FLOW_LOG_INTERVAL)
     for {
         select {
         case newBytes := <-ch:
             byteCount += newBytes
-            // TODO(matt9j) Need to dispatch out to the appropriate user based on traffic type!
-        case <-time.After(FLOW_LOG_INTERVAL):
+            generateUsageEvents(flow, newBytes, wg)
+        case <-logTime:
+            // TODO(matt9j) Report the flow statistics to the database for long term logging
+            // TODO(matt9j) Ensure the flow has a consistent direction with appropriate up/down assigned
+            logTime = time.After(FLOW_LOG_INTERVAL)
             if byteCount == 0 {
-                // Reclaim handlers and channels from flows that have finished.
+                // Reclaim handlers and channels from flows idle an entire period.
                 log.WithField("Flow", flow).Info("Reclaiming")
                 return
             }
-            // TODO(matt9j) Report the flow statistics to the database for long term logging
             log.WithField("Flow", flow).Info(byteCount)
             byteCount = 0
         }
+    }
+}
 
+func generateUsageEvents(flow gopacket.Flow, amount int, wg *sync.WaitGroup) {
+    if isUser(flow.Src()) {
+        if isLocal(flow.Dst()) {
+            sendToUserAggregator(flow.Src(), usageEvent{LOCAL_UP, amount}, wg)
+        } else {
+            sendToUserAggregator(flow.Src(), usageEvent{EXT_UP, amount}, wg)
+        }
+    }
+
+    if isUser(flow.Dst()) {
+        if isLocal(flow.Src()) {
+            sendToUserAggregator(flow.Dst(), usageEvent{LOCAL_DOWN, amount}, wg)
+        } else {
+            sendToUserAggregator(flow.Dst(), usageEvent{EXT_DOWN, amount}, wg)
+        }
     }
 }
 
 func sendToUserAggregator(user gopacket.Endpoint, event usageEvent, wg *sync.WaitGroup) {
-    var userChannel interface{}
-    var ok bool
-    userChannel, ok = userAggregators.Load(user)
+    userChannel, ok := userAggregators.Load(user)
 
     if !ok {
         // Attempt to allocate a new user channel atomically. This can race between the check above and when the channel
