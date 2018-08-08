@@ -26,9 +26,10 @@ type usageEvent struct {
 }
 
 var (
-    device                                        = "wlp1s0"
+    device          = "gtp0"
     snapshot_len    int32  = 1024
-    promiscuous                    = false
+    promiscuous     = true
+    snapshotTimeout = 5 * time.Second
     err             error
     handle          *pcap.Handle
     flowHandlers    = new(sync.Map)
