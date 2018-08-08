@@ -7,9 +7,9 @@ import (
 	"github.com/google/gopacket"
     "github.com/google/gopacket/pcap"
     "sync"
-    "net"
     _ "github.com/go-sql-driver/mysql"
     "database/sql"
+    "github.com/uw-ictd/haulage/internal/classify"
 )
 
 const FLOW_LOG_INTERVAL = 5 * time.Second
@@ -38,56 +38,6 @@ var (
     flowHandlers    = new(sync.Map)
     userAggregators = new(sync.Map)
 )
-
-var privateIPBlocks []*net.IPNet
-
-func init() {
-    for _, cidr := range []string {
-        "10.0.0.0/8",
-        "172.16.0.0/12",
-        "192.168.0.0/16",
-    } {
-        _, block, _ := net.ParseCIDR(cidr)
-        privateIPBlocks = append(privateIPBlocks, block)
-    }
-}
-
-func isPrivateIP(ip net.IP) bool {
-    for _, block := range privateIPBlocks {
-        if block.Contains(ip) {
-            return true
-        }
-    }
-    return !net.IP.IsGlobalUnicast(ip)
-}
-
-// Deployment specific logic to determine if traffic is from a user.
-func isUser(endpoint gopacket.Endpoint) bool {
-    ip := net.ParseIP(endpoint.String())
-    if ip == nil {
-        log.WithField("Endpoint", endpoint).Error("Endpoint is not IP parseable")
-        return false
-    }
-
-    // Exclude specific IPs assigned to our network hardware in the user subnet.
-    if ip.Equal(net.ParseIP("192.168.151.1")) {
-        return false
-    }
-
-    _, userBlock, _ := net.ParseCIDR("192.168.151.0/24")
-
-    return userBlock.Contains(ip)
-}
-
-// Deployment specific logic to determine if traffic is local only
-func isLocal(endpoint gopacket.Endpoint) bool {
-    ip := net.ParseIP(endpoint.String())
-    if ip == nil {
-        log.WithField("Endpoint", endpoint).Error("Endpoint is not IP parseable")
-        return false
-    }
-    return isPrivateIP(ip)
-}
 
 // Parse the network layer of the packet and push it to the appropriate channel for each flow.
 func classifyPacket(packet gopacket.Packet, wg *sync.WaitGroup) {
@@ -153,16 +103,16 @@ func flowHandler(ch chan int, flow gopacket.Flow, wg *sync.WaitGroup) {
 }
 
 func generateUsageEvents(flow gopacket.Flow, amount int, wg *sync.WaitGroup) {
-    if isUser(flow.Src()) {
-        if isLocal(flow.Dst()) {
+    if classify.User(flow.Src()) {
+        if classify.Local(flow.Dst()) {
             sendToUserAggregator(flow.Src(), usageEvent{LOCAL_UP, amount}, wg)
         } else {
             sendToUserAggregator(flow.Src(), usageEvent{EXT_UP, amount}, wg)
         }
     }
 
-    if isUser(flow.Dst()) {
-        if isLocal(flow.Src()) {
+    if classify.User(flow.Dst()) {
+        if classify.Local(flow.Src()) {
             sendToUserAggregator(flow.Dst(), usageEvent{LOCAL_DOWN, amount}, wg)
         } else {
             sendToUserAggregator(flow.Dst(), usageEvent{EXT_DOWN, amount}, wg)
