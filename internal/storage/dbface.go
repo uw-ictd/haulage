@@ -8,6 +8,7 @@ import (
     log "github.com/sirupsen/logrus"
     "net"
     "errors"
+    "time"
 )
 
 type UseEvent struct {
@@ -88,4 +89,15 @@ func LogUsage(db *sql.DB, event UseEvent) (UserStatus, error) {
     }
     log.WithField("User", event.UserAddress).Error("Giving up committing billing update!")
     return UserStatus{}, errors.New("data loss: unable to commit")
+}
+
+func LogFlow(db *sql.DB, start time.Time, stop time.Time, flow gopacket.Flow, hostA string, hostB string, bytesAB int, bytesBA int) {
+    // TODO(matt9j) Lookup the correct hostname to host number mapping and insert if necessary.
+
+    _, err := db.Exec("INSERT INTO flowlogs VALUE (?, ?, ?, ?, ?, ?, ?, ?)",
+        start, stop, flow.Src().Raw(), flow.Dst().Raw(), 0, 0, bytesAB, bytesBA)
+    if err != nil {
+        // TODO(matt9j) Log the flow event itself once one is defined.
+        log.WithError(err).Error("Unable to commit a flow log!!!")
+    }
 }

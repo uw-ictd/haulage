@@ -13,8 +13,8 @@ import (
     "github.com/uw-ictd/haulage/internal/storage"
 )
 
-const FLOW_LOG_INTERVAL = 5 * time.Second
-const USER_LOG_INTERVAL = 10 * time.Second
+const FLOW_LOG_INTERVAL = 2 * time.Second
+const USER_LOG_INTERVAL = 3 * time.Second
 
 type FlowType int
 const (
@@ -26,6 +26,11 @@ const (
 
 type usageEvent struct {
     trafficType FlowType
+    amount int
+}
+
+type flowEvent struct {
+    flow gopacket.Flow
     amount int
 }
 
@@ -60,48 +65,68 @@ func classifyPacket(packet gopacket.Packet, wg *sync.WaitGroup) {
         log.Error("Error decoding some part of the packet:", err)
     }
 
-    sendToFlowHandler(packet, wg)
+    sendToFlowHandler(flowEvent{packet.NetworkLayer().NetworkFlow(), len(packet.NetworkLayer().LayerPayload())}, wg)
 }
 
-func sendToFlowHandler(packet gopacket.Packet, wg *sync.WaitGroup) {
-    if flowChannel, ok := flowHandlers.Load(packet.NetworkLayer().NetworkFlow()); ok {
-        flowChannel.(chan int) <- len(packet.NetworkLayer().LayerPayload())
+func sendToFlowHandler(event flowEvent, wg *sync.WaitGroup) {
+    if flowChannel, ok := flowHandlers.Load(event.flow); ok {
+        flowChannel.(chan flowEvent) <- event
     } else {
         // Attempt to allocate a new flow channel atomically. This can race between the check above and when the channel
         // is created.
-        newChannel, existed := flowHandlers.LoadOrStore(packet.NetworkLayer().NetworkFlow(), make(chan int))
+        newChannel, existed := flowHandlers.LoadOrStore(event.flow, make(chan flowEvent))
         if !existed {
             wg.Add(1)
-            go flowHandler(newChannel.(chan int), packet.NetworkLayer().NetworkFlow(), wg)
+            go flowHandler(newChannel.(chan flowEvent), event.flow, wg)
         }
-        newChannel.(chan int) <- len(packet.NetworkLayer().LayerPayload())
+        newChannel.(chan flowEvent) <- event
     }
 }
 
-func flowHandler(ch chan int, flow gopacket.Flow, wg *sync.WaitGroup) {
+func flowHandler(ch chan flowEvent, flow gopacket.Flow, wg *sync.WaitGroup) {
     defer wg.Done()
     defer close(ch)
     defer flowHandlers.Delete(flow)
-    byteCount := 0
+    // The flow logger will receive events from both A->B and B->A
+    endA := flow.Src()
+    bytesAB := 0
+    bytesBA := 0
+    intervalStart := time.Now()
     logTime := time.After(FLOW_LOG_INTERVAL)
     for {
         select {
-        case newBytes := <-ch:
-            byteCount += newBytes
-            generateUsageEvents(flow, newBytes, wg)
+        case event := <-ch:
+            if event.flow.Src() == endA {
+                bytesAB += event.amount
+                log.Info(event.flow.Src(), event.flow.Dst())
+            } else {
+                log.Info("else case")
+                bytesBA += event.amount
+            }
+            generateUsageEvents(event.flow, event.amount, wg)
         case <-logTime:
-            // TODO(matt9j) Report the flow statistics to the database for long term logging
-            // TODO(matt9j) Ensure the flow has a consistent direction with appropriate up/down assigned
-            logTime = time.After(FLOW_LOG_INTERVAL)
-            if byteCount == 0 {
+            if (bytesAB == 0) && (bytesBA == 0) {
                 // Reclaim handlers and channels from flows idle an entire period.
                 log.WithField("Flow", flow).Info("Reclaiming")
                 return
             }
-            log.WithField("Flow", flow).Info(byteCount)
-            byteCount = 0
+
+            intervalEnd := time.Now()
+            wg.Add(1)
+            go logFlow(intervalStart, intervalEnd, flow, bytesAB, bytesBA, wg)
+            intervalStart = intervalEnd
+            log.WithField("Flow", flow).Debug(bytesAB, bytesBA)
+            bytesAB = 0
+            bytesBA = 0
+            logTime = time.After(FLOW_LOG_INTERVAL)
         }
     }
+}
+
+func logFlow(start time.Time, stop time.Time, flow gopacket.Flow, bytesAB int, bytesBA int, wg *sync.WaitGroup) {
+    defer wg.Done()
+    // TODO(matt9j) Sniff and lookup the hostnames as needed.
+    storage.LogFlow(db, start, stop, flow, "", "", bytesAB, bytesBA)
 }
 
 func generateUsageEvents(flow gopacket.Flow, amount int, wg *sync.WaitGroup) {
@@ -172,6 +197,7 @@ func aggregateUser(ch chan usageEvent, user gopacket.Endpoint, wg *sync.WaitGrou
             }
             log.WithField("User", user).Debug(localUpBytes, localDownBytes, extUpBytes, extDownBytes)
             // TODO(matt9j) Consider logging local traffic just for analysis purposes.
+            // TODO(matt9j) Add this to the wait group and run async.
             storage.LogUsage(db, storage.UseEvent{user, extUpBytes, extDownBytes})
             localUpBytes = 0
             localDownBytes = 0
