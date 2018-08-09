@@ -66,8 +66,10 @@ func LogUsage(db *sql.DB, event UseEvent) (UserStatus, error) {
         }
 
         // Business logic accounting for the event.
-        rawDown += event.BytesDown
-        rawUp += event.BytesUp
+        // TODO(matt9j) Continuing to log the raw up/down for the interval to match the python implementation, but
+        // should now no longer be necessary.
+        rawDown = event.BytesDown
+        rawUp = event.BytesUp
         dataBalance -= event.BytesUp
         dataBalance -= event.BytesDown
 
