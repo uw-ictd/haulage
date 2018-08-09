@@ -92,7 +92,7 @@ func sendToFlowHandler(event flowEvent, wg *sync.WaitGroup) {
 func flowHandler(ch chan flowEvent, flow gopacket.Flow, wg *sync.WaitGroup) {
     defer wg.Done()
     defer close(ch)
-    defer flowHandlers.Delete(flow)
+    defer flowHandlers.Delete(flow.FastHash())
     // The flow logger will receive events from both A->B and B->A
     endA := flow.Src()
     bytesAB := 0
