@@ -124,6 +124,8 @@ func UpdateBridgedState(db *sql.DB, userIP net.IP, bridged bool) error {
             log.WithField("Attempt", i).WithField("imsi", imsi).WithError(err).Warn("Unable to commit")
         }
     }
+
+    return nil
 }
 
 func LogFlow(db *sql.DB, start time.Time, stop time.Time, flow gopacket.Flow, hostA string, hostB string, bytesAB int, bytesBA int) {
@@ -135,4 +137,69 @@ func LogFlow(db *sql.DB, start time.Time, stop time.Time, flow gopacket.Flow, ho
         // TODO(matt9j) Log the flow event itself once one is defined.
         log.WithError(err).Error("Unable to commit a flow log!!!")
     }
+}
+
+type UserBridgedState struct {
+    Addr    net.IP
+    Bridged bool
+}
+
+func QueryGlobalBridgedState(db *sql.DB) ([]UserBridgedState) {
+    rows, err := db.Query("SELECT ip, bridged FROM customers, static_ips WHERE customers.imsi=static_ips.imsi AND enabled=1")
+    if err != nil {
+        log.WithError(err).Error("Unable to query initial bridged state")
+    }
+    defer rows.Close()
+
+    var ipString string
+    var bridged bool
+
+    globalState := make([]UserBridgedState, 0)
+
+    for rows.Next() {
+        if err := rows.Scan(&ipString, &bridged); err != nil {
+            log.WithError(err).Error("Unable to scan bridged state")
+        }
+
+        addr := net.ParseIP(ipString)
+        if addr == nil {
+            log.WithField("String", ipString).Error("Unable to parse string to IP")
+        }
+        globalState = append(globalState, UserBridgedState{addr, bridged})
+    }
+    if err = rows.Err(); err != nil {
+        log.WithError(err).Error("Error encountered when reading bridged state rows")
+    }
+
+    return globalState
+}
+
+func QueryToppedUpCustomers(db * sql.DB) ([]net.IP) {
+    // Topped up customers are customers that have data balance but are not bridged!
+    rows, err := db.Query("SELECT ip FROM customers, static_ips WHERE customers.imsi=static_ips.imsi AND enabled=1 AND data_balance>0 AND bridged=0")
+    if err != nil {
+        log.WithError(err).Error("Unable to query topped up customers")
+    }
+    defer rows.Close()
+
+    var ipString string
+
+    toppedUpUsers := make([]net.IP, 0)
+
+    for rows.Next() {
+        if err := rows.Scan(&ipString); err != nil {
+            log.WithError(err).Error("Unable to scan topped up ip")
+        }
+
+        addr := net.ParseIP(ipString)
+        if addr == nil {
+            log.WithField("String", ipString).Error("Unable to parse string to IP")
+        }
+        toppedUpUsers = append(toppedUpUsers, addr)
+    }
+    if err = rows.Err(); err != nil {
+        log.WithError(err).Error("Error encountered when reading topped up user rows")
+    }
+
+    return toppedUpUsers
 }

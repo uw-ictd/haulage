@@ -237,6 +237,42 @@ func verifyBalance(user storage.UserStatus) {
     }
 }
 
+func synchronizeFiltersToDb(db *sql.DB) {
+    storedState := storage.QueryGlobalBridgedState(db)
+
+    log.Info("Beginning state synchronization")
+    for _, user := range(storedState) {
+        if user.Bridged {
+            iptables.DisableForwardingFilter(user.Addr)
+        } else {
+            iptables.EnableForwardingFilter(user.Addr)
+        }
+    }
+    log.Info("State synchronization ended")
+}
+
+func pollForReenabledUsers(terminateSignal chan bool, db *sql.DB, wg *sync.WaitGroup) {
+    defer wg.Done()
+    defer close(terminateSignal)
+    ticker := time.NewTicker(20*time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-terminateSignal:
+            log.Info("Shutting down poller")
+            return
+        case <-ticker.C:
+            usersToEnable := storage.QueryToppedUpCustomers(db)
+            for _, userIp := range(usersToEnable) {
+                iptables.DisableForwardingFilter(userIp)
+                storage.UpdateBridgedState(db, userIp, true)
+                log.WithField("User", userIp).Info("User traffic re-enabled")
+            }
+        }
+    }
+}
+
 func main() {
     // Open device
     log.Info("Starting haulage")
@@ -259,7 +295,12 @@ func main() {
         log.Fatal(err)
     }
 
+    // Setup iptables filtering
+    synchronizeFiltersToDb(db)
     var processingGroup sync.WaitGroup
+    processingGroup.Add(1)
+    terminatePolling := make(chan bool)
+    go pollForReenabledUsers(terminatePolling, db, &processingGroup)
 
     // Skip directly to decoding IPv4 on the tunneled packets.
     // TODO(matt9j) Make this smarter to use ip4 or ip6 based on the tunnel address and type?
@@ -274,5 +315,6 @@ func main() {
         classifyPacket(packet, &processingGroup)
     }
 
+    //terminatePolling <- true
     processingGroup.Wait()
 }
