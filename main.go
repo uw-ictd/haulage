@@ -13,6 +13,8 @@ import (
     "github.com/uw-ictd/haulage/internal/storage"
     "github.com/uw-ictd/haulage/internal/iptables"
     "net"
+    "os/signal"
+    "os"
 )
 
 const FLOW_LOG_INTERVAL = 2 * time.Second
@@ -251,9 +253,8 @@ func synchronizeFiltersToDb(db *sql.DB) {
     log.Info("State synchronization ended")
 }
 
-func pollForReenabledUsers(terminateSignal chan bool, db *sql.DB, wg *sync.WaitGroup) {
+func pollForReenabledUsers(terminateSignal chan struct{}, db *sql.DB, wg *sync.WaitGroup) {
     defer wg.Done()
-    defer close(terminateSignal)
     ticker := time.NewTicker(20*time.Second)
     defer ticker.Stop()
 
@@ -299,8 +300,19 @@ func main() {
     synchronizeFiltersToDb(db)
     var processingGroup sync.WaitGroup
     processingGroup.Add(1)
-    terminatePolling := make(chan bool)
+    terminatePolling := make(chan struct{})
     go pollForReenabledUsers(terminatePolling, db, &processingGroup)
+
+    // Setup interrupt catching to cleanup connections
+    sigintChan := make(chan os.Signal, 1)
+    signal.Notify(sigintChan, os.Interrupt)
+    go func() {
+        <- sigintChan
+        handle.Close()
+        close(terminatePolling)
+        <- sigintChan
+        log.Fatal("Terminating Uncleanly! Connections may be orphaned.")
+    } ()
 
     // Skip directly to decoding IPv4 on the tunneled packets.
     // TODO(matt9j) Make this smarter to use ip4 or ip6 based on the tunnel address and type?
@@ -315,6 +327,5 @@ func main() {
         classifyPacket(packet, &processingGroup)
     }
 
-    //terminatePolling <- true
     processingGroup.Wait()
 }
