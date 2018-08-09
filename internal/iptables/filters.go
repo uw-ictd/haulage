@@ -3,6 +3,7 @@ package iptables
 import (
     "os/exec"
     "net"
+    "strings"
     log "github.com/sirupsen/logrus"
 )
 
@@ -26,7 +27,7 @@ func EnableForwardingFilter(addr net.IP) {
     }
 
     if len(output) != 0 {
-        log.Warnf("Iptables generated output: %s", output)
+        log.WithField("stdio", strings.TrimSpace(string(output))).Infof("Iptables generated output")
     }
 }
 
@@ -35,10 +36,10 @@ func DisableForwardingFilter(addr net.IP) {
     //cmd := exec.Command("echo", "Unfiltered IP " + addr.String())
     output, err := cmd.CombinedOutput()
     if err != nil {
-        log.WithError(err).Error("Failed to run ip address remove filter and capture output")
+        log.WithError(err).Warn("Failed to run ip address remove filter")
     }
 
     if len(output) != 0 {
-        log.Warnf("Iptables generated output: %s", output)
+        log.WithField("stdio", strings.TrimSpace(string(output))).Infof("Iptables generated output")
     }
 }

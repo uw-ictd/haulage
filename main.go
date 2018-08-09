@@ -244,7 +244,7 @@ func verifyBalance(user storage.UserStatus) {
 func synchronizeFiltersToDb(db *sql.DB) {
     storedState := storage.QueryGlobalBridgedState(db)
 
-    log.Info("Beginning state synchronization")
+    log.Info("----------Beginning state synchronization----------")
     for _, user := range(storedState) {
         log.WithField("User", user.Addr).WithField("Bridged:", user.Bridged).Info("Setting user bridging")
         if user.Bridged {
@@ -253,7 +253,7 @@ func synchronizeFiltersToDb(db *sql.DB) {
             iptables.EnableForwardingFilter(user.Addr)
         }
     }
-    log.Info("State synchronization ended")
+    log.Info("----------State synchronization ended----------")
 }
 
 func pollForReenabledUsers(terminateSignal chan struct{}, db *sql.DB, wg *sync.WaitGroup) {
@@ -269,9 +269,9 @@ func pollForReenabledUsers(terminateSignal chan struct{}, db *sql.DB, wg *sync.W
         case <-ticker.C:
             usersToEnable := storage.QueryToppedUpCustomers(db)
             for _, userIp := range(usersToEnable) {
+                log.WithField("User", userIp).Info("Re-enabling user traffic")
                 iptables.DisableForwardingFilter(userIp)
                 storage.UpdateBridgedState(db, userIp, true)
-                log.WithField("User", userIp).Info("User traffic re-enabled")
             }
         }
     }
