@@ -22,6 +22,8 @@ const FLOW_LOG_INTERVAL = 5 * time.Minute
 // User logs result in an update and can occur more frequently.
 const USER_LOG_INTERVAL = 1 * time.Minute
 
+const REENABLE_USER_POLL_INTERVAL = 5 * time.Second
+
 type FlowType int
 const (
     LOCAL_UP FlowType = 0
@@ -258,7 +260,7 @@ func synchronizeFiltersToDb(db *sql.DB) {
 
 func pollForReenabledUsers(terminateSignal chan struct{}, db *sql.DB, wg *sync.WaitGroup) {
     defer wg.Done()
-    ticker := time.NewTicker(20*time.Second)
+    ticker := time.NewTicker(REENABLE_USER_POLL_INTERVAL)
     defer ticker.Stop()
 
     for {
