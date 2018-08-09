@@ -17,8 +17,10 @@ import (
     "os"
 )
 
-const FLOW_LOG_INTERVAL = 2 * time.Second
-const USER_LOG_INTERVAL = 3 * time.Second
+// The flow logs generate new records each time, and should be on a longer timer to save disk space.
+const FLOW_LOG_INTERVAL = 5 * time.Minute
+// User logs result in an update and can occur more frequently.
+const USER_LOG_INTERVAL = 1 * time.Minute
 
 type FlowType int
 const (
@@ -59,7 +61,7 @@ func classifyPacket(packet gopacket.Packet, wg *sync.WaitGroup) {
     }
 
     if packet.NetworkLayer() == nil {
-        log.WithField("Packet", packet).Info(
+        log.WithField("Packet", packet).Debug(
             "Packet has no network layer and will not be counted")
         return
     }
@@ -244,6 +246,7 @@ func synchronizeFiltersToDb(db *sql.DB) {
 
     log.Info("Beginning state synchronization")
     for _, user := range(storedState) {
+        log.WithField("User", user.Addr).WithField("Bridged:", user.Bridged).Info("Setting user bridging")
         if user.Bridged {
             iptables.DisableForwardingFilter(user.Addr)
         } else {
@@ -277,9 +280,9 @@ func pollForReenabledUsers(terminateSignal chan struct{}, db *sql.DB, wg *sync.W
 func main() {
     // Open device
     log.Info("Starting haulage")
-    //handle, err = pcap.OpenLive(device, snapshot_len, promiscuous, snapshotTimeout)
+    handle, err = pcap.OpenLive(device, snapshot_len, promiscuous, snapshotTimeout)
     // Open file
-    handle, err = pcap.OpenOffline("testdata/small.pcap")
+    //handle, err = pcap.OpenOffline("testdata/small.pcap")
     if err != nil {
         log.Fatal(err)
     }
