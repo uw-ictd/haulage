@@ -11,6 +11,8 @@ import (
     "database/sql"
     "github.com/uw-ictd/haulage/internal/classify"
     "github.com/uw-ictd/haulage/internal/storage"
+    "github.com/uw-ictd/haulage/internal/iptables"
+    "net"
 )
 
 const FLOW_LOG_INTERVAL = 2 * time.Second
@@ -196,12 +198,42 @@ func aggregateUser(ch chan usageEvent, user gopacket.Endpoint, wg *sync.WaitGrou
             log.WithField("User", user).Debug(localUpBytes, localDownBytes, extUpBytes, extDownBytes)
             // TODO(matt9j) Consider logging local traffic just for analysis purposes.
             // TODO(matt9j) Add this to the wait group and run async.
-            storage.LogUsage(db, storage.UseEvent{user, extUpBytes, extDownBytes})
+            status, err := storage.LogUsage(db,
+                storage.UseEvent{UserAddress: user, BytesUp: extUpBytes, BytesDown: extDownBytes})
+            if err != nil {
+                log.WithError(err).WithField("User", user).Error("Unable to log usage")
+            }
+
+            verifyBalance(status)
             localUpBytes = 0
             localDownBytes = 0
             extUpBytes = 0
             extDownBytes = 0
         }
+    }
+}
+
+func verifyBalance(user storage.UserStatus) {
+    // Send a single alert when crossing a threshold. Go in reverse order so that if the user crosses multiple
+    // thresholds at once only the lowest alert is sent.
+    switch {
+    case user.CurrentDataBalance > 10000000: // 10MB
+        // In the normal case when the user has lots of balance, exit early and skip the check processing below.
+        return
+    case (user.CurrentDataBalance <= 0) && (user.PriorDataBalance > 0):
+        log.WithField("User", user.UserAddress).Info("No balance remaining")
+        addr := net.ParseIP(user.UserAddress.String())
+        if addr == nil {
+            log.WithField("Endpoint", user.UserAddress).Error("Unable to parse an IP from endpoint")
+        }
+        iptables.EnableForwardingFilter(addr)
+        storage.UpdateBridgedState(db, addr, false)
+    case (user.CurrentDataBalance <= 1000000) && (user.PriorDataBalance > 1000000):
+        log.WithField("User", user.UserAddress).Info("Less than 1MB remaining")
+    case (user.CurrentDataBalance <= 5000000) && (user.PriorDataBalance > 5000000):
+        log.WithField("User", user.UserAddress).Info("Less than 5MB remaining")
+    case (user.CurrentDataBalance <= 10000000) && (user.PriorDataBalance > 10000000):
+        log.WithField("User", user.UserAddress).Info("Less than 10MB remaining")
     }
 }
 

@@ -18,13 +18,13 @@ type UseEvent struct {
 }
 
 type UserStatus struct {
-    userAddress gopacket.Endpoint
-    dataBalance int64
-    currencyBalance decimal.Decimal
+    UserAddress        gopacket.Endpoint
+    CurrentDataBalance int64
+    PriorDataBalance   int64
+    CurrencyBalance    decimal.Decimal
 }
 
 func LogUsage(db *sql.DB, event UseEvent) (UserStatus, error) {
-    // TODO(matt9j) Validate what actually happens when an address can't be parsed. Is a zero address returned? Do we panic?
     ip := net.ParseIP(event.UserAddress.String())
     if ip == nil {
         log.WithField("Endpoint", event.UserAddress).Error("Unable to parse user IP")
@@ -70,6 +70,7 @@ func LogUsage(db *sql.DB, event UseEvent) (UserStatus, error) {
         // should now no longer be necessary.
         rawDown = event.BytesDown
         rawUp = event.BytesUp
+        priorDataBalance := dataBalance
         dataBalance -= event.BytesUp
         dataBalance -= event.BytesDown
 
@@ -86,11 +87,43 @@ func LogUsage(db *sql.DB, event UseEvent) (UserStatus, error) {
         if err != nil {
             log.WithField("Attempt", i).WithField("imsi", imsi).WithError(err).Warn("Unable to commit")
         } else {
-            return UserStatus{event.UserAddress, dataBalance, balance}, err
+            return UserStatus{event.UserAddress, dataBalance, priorDataBalance, balance}, err
         }
     }
     log.WithField("User", event.UserAddress).Error("Giving up committing billing update!")
     return UserStatus{}, errors.New("data loss: unable to commit")
+}
+
+func UpdateBridgedState(db *sql.DB, userIP net.IP, bridged bool) error {
+    // Attempt to commit an update 3 times, barring other more serious errors.
+    for i := 0; i < 3; i++ {
+        trx, err := db.Begin()
+        if err != nil {
+            log.WithError(err).Error("Unable to begin bridge update transaction")
+            return err
+        }
+
+        var imsi int64
+        err = trx.QueryRow("select imsi from static_ips where ip=?", userIP.String()).Scan(&imsi)
+        if err != nil {
+            log.WithField("ip", userIP).WithError(err).Error("Unable to lookup imsi's static ip address")
+            // TODO(matt9j) Consider deferring the rollback?
+            trx.Rollback()
+            return err
+        }
+
+        _, err = trx.Exec("UPDATE customers SET bridged=? WHERE imsi=?", bridged, imsi)
+        if err != nil {
+            log.WithField("imsi", imsi).WithError(err).Error("Unable to execute update customer bridged data")
+            trx.Rollback()
+            return err
+        }
+
+        err = trx.Commit()
+        if err != nil {
+            log.WithField("Attempt", i).WithField("imsi", imsi).WithError(err).Warn("Unable to commit")
+        }
+    }
 }
 
 func LogFlow(db *sql.DB, start time.Time, stop time.Time, flow gopacket.Flow, hostA string, hostB string, bytesAB int, bytesBA int) {
