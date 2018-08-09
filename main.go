@@ -18,7 +18,7 @@ import (
 )
 
 // The flow logs generate new records each time, and should be on a longer timer to save disk space.
-const FLOW_LOG_INTERVAL = 5 * time.Minute
+const FLOW_LOG_INTERVAL = 20 * time.Minute
 // User logs result in an update and can occur more frequently.
 const USER_LOG_INTERVAL = 1 * time.Minute
 
