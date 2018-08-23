@@ -12,7 +12,7 @@ A golang tool for measuring, logging, and controlling network usage to allow bil
 
 ## When haulage?
 * When you need to account for network traffic flows passing through a unix system.
-* When you are interested in aggregate usage, not packet by packet logging or detailed timing stats.
+* When you are interested in aggregate usage, not packet by packet logging or detailed timing.
 * When you need to operate in human time (pseudo real time).
 * When you operate in a constrained environment where alternative (and more fully featured) tools may be overkill.
 
