@@ -20,7 +20,6 @@ check out the list below.
  * markdown: [GitHub Guides: Mastering Markdown](https://guides.github.com/features/mastering-markdown/)
 
 # How do I make a contribution?
-
 Never made an open source contribution before? Wondering how contributions work in the in our project? Here's a quick
 rundown!
 
@@ -39,12 +38,17 @@ rundown!
 13. Make changes to the pull request if the reviewing maintainer recommends them.
 14. Celebrate your success after your pull request is merged!
 
+## Code Style
+As a golang project, all contributions must adhere to the [go fmt](https://blog.golang.org/go-fmt-your-code) standard
+and pass [golint](https://github.com/golang/lint). Naming and comment styles should follow the golang best practices in
+[Effective Go](https://golang.org/doc/effective_go.html). To help keep issues in the open, todos in code merged to
+master must be of the format `// TODO(####) Comment text here` where `####` is an open github issue number.
+
 # Where can I go for help?
 If you need help, please check the mailing list archive or ask a new question on the list
 [https://groups.google.com/forum/#!forum/haulage](https://groups.google.com/forum/#!forum/haulage).
 
 # Love
-
 Thank you for your interest in the haulage project! Open source only lives via your help and support!
 
 ---

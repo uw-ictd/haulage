@@ -37,14 +37,7 @@ maintainer will do their best to respond in a reasonable amount of time. When pr
 the mission of haulage to remain a simple, customizable, and lightweight tool. Other more powerful open source network
 monitoring frameworks already enjoy broad community support.
 
-## Contributing
-
-## Style
-
-As a golang project, all contributions must adhere to the [go fmt](https://blog.golang.org/go-fmt-your-code) standard
-and pass [golint](https://github.com/golang/lint). Naming and comment styles should follow the golang best practices in
-[Effective Go](https://golang.org/doc/effective_go.html). To help keep issues in the open, todos in code merged to
-master must be of the format `// TODO(####) Comment text here` where `####` is an open github issue number.
+For more details check out the [contriubting](CONTRIUBTING.md) page.
 
 # History
 
