@@ -11,14 +11,12 @@ A golang tool for measuring, logging, and controlling network usage to allow bil
 > *-Merriam-Webster Online*
 
 ## When haulage?
-
 * When you need to account for network traffic flows passing through a unix system.
 * When you are interested in aggregate usage, not packet by packet logging or detailed timing stats.
 * When you need to operate in human time (pseudo real time).
 * When you operate in a constrained environment where alternative (and more fully featured) tools may be overkill.
 
 # Usage
-
 ## Install from source with go
  1) Install the go tools for your platform, available from [golang.org](https://golang.org/doc/install)
  2) `go get github.com/uw-ictd/haulage`
@@ -27,8 +25,10 @@ A golang tool for measuring, logging, and controlling network usage to allow bil
 
 Forthcoming. If you're interested in helping us build a binary packaging infrastructure we would love your help!
 
-# Developing
+## Configuration
 
+
+# Developing
 haulage is an open source project, and participation is always welcome. We strive to be an open and
 respectful community, so please read and follow our [Community Code of Conduct](CODE_OF_CONDUCT.md).
 
@@ -40,7 +40,6 @@ monitoring frameworks already enjoy broad community support.
 For more details check out the [contriubting](CONTRIUBTING.md) page.
 
 # History
-
 Haulage grew out of a need for the [CoLTE Community Cellular Networking project](https://github.com/uw-ictd/colte) to measure network utilization to
 account for spending against prepaid cellular data packages and log long-term traffic statistics to aid network
 planning. Many feature rich network monitors exist, but offer relatively heavy implementations over-provisioned for our
