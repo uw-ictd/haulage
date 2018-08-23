@@ -1,3 +1,7 @@
+[![Go Report Card](https://goreportcard.com/badge/github.com/uw-ictd/haulage)](https://goreportcard.com/report/github.com/uw-ictd/haulage)
+[![Build Status](https://travis-ci.org/uw-ictd/haulage.svg?branch=master)](https://travis-ci.org/uw-ictd/haulage)
+[![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](LICENSE)
+
 # haulage
 A golang tool for measuring, logging, and controlling network usage to allow billing and analysis.
 
