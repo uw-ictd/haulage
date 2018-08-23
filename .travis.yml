@@ -1,0 +1,24 @@
+# Use the VM environment to setup dependency on libpcap
+sudo: true
+before_install:
+ - sudo apt-get install libpcap-dev
+
+language: go
+
+# Only the last two Go releases are supported by the Go team with security
+# updates. Any older versions be considered deprecated. Don't bother testing
+# with them.
+go:
+  - 1.x
+
+# Only clone the most recent commit.
+git:
+  depth: 1
+
+# Don't email results.
+notifications:
+  email: false
+
+script:
+  - go test -v -race ./...  # Run all the tests with the race detector enabled
+  - go vet ./... # Ensure the code passes govet
