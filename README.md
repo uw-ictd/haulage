@@ -5,10 +5,10 @@ A golang tool for measuring, logging, and controlling network usage to allow bil
 >
 >/ˈhôlij/ noun
 >
->the commercial transport of goods,
->a charge for commercial transport of goods
+> 1. the act or process of hauling
+> 2. a charge made for hauling
 >
-> *-definition from google.com*
+> *-Merriam-Webster Online*
 
 ## When haulage?
 
