@@ -7,8 +7,9 @@ language: go
 
 # Only the last two Go releases are supported by the Go team with security
 # updates. Any older versions be considered deprecated. Don't bother testing
-# with them.
+# with them. The project uses go modules, requiring go 1.11 or newer.
 go:
+  - 1.11
   - 1.x
 
 # Only clone the most recent commit.
@@ -20,5 +21,5 @@ notifications:
   email: false
 
 script:
-  - go test -v -race ./...  # Run all the tests with the race detector enabled
-  - go vet ./... # Ensure the code passes govet
+  - env GO111MODULE=on go test -v -race ./...  # Run all the tests with the race detector enabled
+  - env GO111MODULE=on go vet ./... # Ensure the code passes govet
