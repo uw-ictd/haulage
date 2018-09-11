@@ -15,6 +15,9 @@ all: build package
 build:
 	$(GOBUILD) -o $(BINARY_LOCATION) -v
 
+build-clean:
+	$(GOCLEAN)
+
 package: build
 	$(info $$VERSION is [${VERSION}])
 	$(info $$USER_EMAIL is [${USER_EMAIL}])
@@ -34,7 +37,7 @@ package: build
 		--depends 'libpcap' \
 		$(BINARY_LOCATION)
 
-clean:
-	rm $(BINARY_LOCATION)
+package-clean:
 	rm haulage_*\.deb
 
+clean: package-clean build-clean
