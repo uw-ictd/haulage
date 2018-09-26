@@ -213,7 +213,7 @@ func main() {
 	log.Info("Starting haulage")
 	handle, err = pcap.OpenLive(device, snapshot_len, promiscuous, snapshotTimeout)
 	// Open file
-	//handle, err = pcap.OpenOffline("testdata/small.pcap")
+	// handle, err = pcap.OpenOffline("testdata/small.pcap")
 	if err != nil {
 		log.Fatal(err)
 	}
