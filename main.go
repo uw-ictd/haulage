@@ -2,19 +2,17 @@ package main
 
 import (
 	"database/sql"
+	"os"
+	"os/signal"
+	"sync"
+	"time"
+
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	log "github.com/sirupsen/logrus"
 	"github.com/uw-ictd/haulage/internal/classify"
-	"github.com/uw-ictd/haulage/internal/iptables"
-	"github.com/uw-ictd/haulage/internal/storage"
-	"net"
-	"os"
-	"os/signal"
-	"sync"
-	"time"
 )
 
 // The flow logs generate new records each time, and should be on a longer timer to save disk space.
