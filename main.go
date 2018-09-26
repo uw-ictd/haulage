@@ -100,7 +100,9 @@ func flowHandler(ch chan flowEvent, flow gopacket.Flow, wg *sync.WaitGroup) {
 	bytesAB := 0
 	bytesBA := 0
 	intervalStart := time.Now()
-	logTime := time.After(FLOW_LOG_INTERVAL)
+	ticker := time.NewTicker(FLOW_LOG_INTERVAL)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case event := <-ch:
@@ -110,7 +112,7 @@ func flowHandler(ch chan flowEvent, flow gopacket.Flow, wg *sync.WaitGroup) {
 				bytesBA += event.amount
 			}
 			generateUsageEvents(event.flow, event.amount, wg)
-		case <-logTime:
+		case <-ticker.C:
 			if (bytesAB == 0) && (bytesBA == 0) {
 				// Reclaim handlers and channels from flows idle an entire period.
 				log.WithField("Flow", flow).Info("Reclaiming")
@@ -125,7 +127,6 @@ func flowHandler(ch chan flowEvent, flow gopacket.Flow, wg *sync.WaitGroup) {
 			log.WithField("Flow", flow).Debug(bytesAB, bytesBA)
 			bytesAB = 0
 			bytesBA = 0
-			logTime = time.After(FLOW_LOG_INTERVAL)
 		}
 	}
 }
@@ -173,7 +174,8 @@ func aggregateUser(ch chan usageEvent, user gopacket.Endpoint, wg *sync.WaitGrou
 	localDownBytes := int64(0)
 	extUpBytes := int64(0)
 	extDownBytes := int64(0)
-	logTime := time.After(USER_LOG_INTERVAL)
+	logTick := time.NewTicker(USER_LOG_INTERVAL)
+	defer logTick.Stop()
 
 	for {
 		select {
@@ -189,8 +191,7 @@ func aggregateUser(ch chan usageEvent, user gopacket.Endpoint, wg *sync.WaitGrou
 			case EXT_DOWN:
 				extDownBytes += delta
 			}
-		case <-logTime:
-			logTime = time.After(USER_LOG_INTERVAL)
+		case <-logTick.C:
 			if (localUpBytes == 0) && (localDownBytes == 0) && (extUpBytes == 0) && (extDownBytes == 0) {
 				// Reclaim handlers and channels from users that have finished.
 				log.WithField("User", user).Info("Reclaiming")
