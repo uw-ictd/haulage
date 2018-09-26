@@ -121,7 +121,8 @@ func flowHandler(ch chan flowEvent, flow gopacket.Flow, wg *sync.WaitGroup) {
 
 			intervalEnd := time.Now()
 			wg.Add(1)
-			go logFlow(intervalStart, intervalEnd, flow, bytesAB, bytesBA, wg)
+			// TODO(matt9j) Sniff and lookup the hostnames as needed.
+			go LogFlowPeriodic(intervalStart, intervalEnd, flow, bytesAB, bytesBA, wg)
 			intervalStart = intervalEnd
 			log.WithField("Flow", flow).Debug(bytesAB, bytesBA)
 			bytesAB = 0
@@ -129,12 +130,6 @@ func flowHandler(ch chan flowEvent, flow gopacket.Flow, wg *sync.WaitGroup) {
 			logTime = time.After(FLOW_LOG_INTERVAL)
 		}
 	}
-}
-
-func logFlow(start time.Time, stop time.Time, flow gopacket.Flow, bytesAB int, bytesBA int, wg *sync.WaitGroup) {
-	defer wg.Done()
-	// TODO(matt9j) Sniff and lookup the hostnames as needed.
-	storage.LogFlow(db, start, stop, flow, "", "", bytesAB, bytesBA)
 }
 
 func generateUsageEvents(flow gopacket.Flow, amount int, wg *sync.WaitGroup) {
@@ -204,79 +199,11 @@ func aggregateUser(ch chan usageEvent, user gopacket.Endpoint, wg *sync.WaitGrou
 				return
 			}
 			log.WithField("User", user).Debug(localUpBytes, localDownBytes, extUpBytes, extDownBytes)
-			// TODO(matt9j) Consider logging local traffic just for analysis purposes.
-			// TODO(matt9j) Add this to the wait group and run async.
-			status, err := storage.LogUsage(db,
-				storage.UseEvent{UserAddress: user, BytesUp: extUpBytes, BytesDown: extDownBytes})
-			if err != nil {
-				log.WithError(err).WithField("User", user).Error("Unable to log usage")
-			}
-
-			verifyBalance(status)
+			LogUserPeriodic(user, localUpBytes, localDownBytes, extUpBytes, extDownBytes)
 			localUpBytes = 0
 			localDownBytes = 0
 			extUpBytes = 0
 			extDownBytes = 0
-		}
-	}
-}
-
-func verifyBalance(user storage.UserStatus) {
-	// Send a single alert when crossing a threshold. Go in reverse order so that if the user crosses multiple
-	// thresholds at once only the lowest alert is sent.
-	switch {
-	case user.CurrentDataBalance > 10000000: // 10MB
-		// In the normal case when the user has lots of balance, exit early and skip the check processing below.
-		return
-	case (user.CurrentDataBalance <= 0) && (user.PriorDataBalance > 0):
-		log.WithField("User", user.UserAddress).Info("No balance remaining")
-		addr := net.ParseIP(user.UserAddress.String())
-		if addr == nil {
-			log.WithField("Endpoint", user.UserAddress).Error("Unable to parse an IP from endpoint")
-		}
-		iptables.EnableForwardingFilter(addr)
-		storage.UpdateBridgedState(db, addr, false)
-	case (user.CurrentDataBalance <= 1000000) && (user.PriorDataBalance > 1000000):
-		log.WithField("User", user.UserAddress).Info("Less than 1MB remaining")
-	case (user.CurrentDataBalance <= 5000000) && (user.PriorDataBalance > 5000000):
-		log.WithField("User", user.UserAddress).Info("Less than 5MB remaining")
-	case (user.CurrentDataBalance <= 10000000) && (user.PriorDataBalance > 10000000):
-		log.WithField("User", user.UserAddress).Info("Less than 10MB remaining")
-	}
-}
-
-func synchronizeFiltersToDb(db *sql.DB) {
-	storedState := storage.QueryGlobalBridgedState(db)
-
-	log.Info("----------Beginning state synchronization----------")
-	for _, user := range storedState {
-		log.WithField("User", user.Addr).WithField("Bridged:", user.Bridged).Info("Setting user bridging")
-		if user.Bridged {
-			iptables.DisableForwardingFilter(user.Addr)
-		} else {
-			iptables.EnableForwardingFilter(user.Addr)
-		}
-	}
-	log.Info("----------State synchronization ended----------")
-}
-
-func pollForReenabledUsers(terminateSignal chan struct{}, db *sql.DB, wg *sync.WaitGroup) {
-	defer wg.Done()
-	ticker := time.NewTicker(REENABLE_USER_POLL_INTERVAL)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-terminateSignal:
-			log.Info("Shutting down poller")
-			return
-		case <-ticker.C:
-			usersToEnable := storage.QueryToppedUpCustomers(db)
-			for _, userIp := range usersToEnable {
-				log.WithField("User", userIp).Info("Re-enabling user traffic")
-				iptables.DisableForwardingFilter(userIp)
-				storage.UpdateBridgedState(db, userIp, true)
-			}
 		}
 	}
 }
@@ -292,23 +219,12 @@ func main() {
 	}
 	defer handle.Close()
 
-	db, err = sql.Open("mysql", "colte:horse@/colte_db")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer db.Close()
+	params := Parameters{"colte_db", "colte", "horse", FLOW_LOG_INTERVAL, USER_LOG_INTERVAL, REENABLE_USER_POLL_INTERVAL}
+	var ctx Context
+	OnStart(ctx, params)
+	defer Cleanup(ctx)
 
-	err = db.Ping()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Setup iptables filtering
-	synchronizeFiltersToDb(db)
 	var processingGroup sync.WaitGroup
-	processingGroup.Add(1)
-	terminatePolling := make(chan struct{})
-	go pollForReenabledUsers(terminatePolling, db, &processingGroup)
 
 	// Setup interrupt catching to cleanup connections
 	sigintChan := make(chan os.Signal, 1)
@@ -316,7 +232,7 @@ func main() {
 	go func() {
 		<-sigintChan
 		handle.Close()
-		close(terminatePolling)
+		OnStop(ctx)
 		<-sigintChan
 		log.Fatal("Terminating Uncleanly! Connections may be orphaned.")
 	}()
