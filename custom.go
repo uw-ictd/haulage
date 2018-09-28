@@ -28,12 +28,19 @@ type Parameters struct {
 	pollInterval    time.Duration
 }
 
+type CustomConfig struct {
+	ReenableUserPollInterval time.Duration `yaml:"reenablePollInterval"`
+	DBLocation               string        `yaml:"dbLocation"`
+	DBUser                   string        `yaml:"dbUser"`
+	DBPass                   string        `yaml:"dbPass"`
+}
+
 // Called on system startup.
-func OnStart(ctx Context, params Parameters) {
+func OnStart(ctx *Context, params Parameters) {
 	dbString := params.dbUser + ":" + params.dbPass + "@/" + params.dbAddr
 	log.WithField("dbString", dbString).Debug("Connecting to db")
 
-	db, err = sql.Open("mysql", dbString)
+	db, err := sql.Open("mysql", dbString)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -51,17 +58,17 @@ func OnStart(ctx Context, params Parameters) {
 	ctx.pollers = new(sync.WaitGroup)
 	ctx.pollers.Add(1)
 	ctx.terminateSig = make(chan struct{})
-	pollInterval := REENABLE_USER_POLL_INTERVAL
+	pollInterval := params.pollInterval
 	go pollForReenabledUsers(ctx.terminateSig, ctx.db, ctx.pollers, pollInterval)
 }
 
 // Cleanup can be called at any time, even on a crash.
-func Cleanup(ctx Context) {
+func Cleanup(ctx *Context) {
 	ctx.db.Close()
 }
 
 // Stop is called gracefully at the end of the server lifecycle.
-func OnStop(ctx Context) {
+func OnStop(ctx *Context) {
 	close(ctx.terminateSig)
 	ctx.pollers.Wait()
 }
@@ -70,7 +77,7 @@ func OnStop(ctx Context) {
 func LogUserPeriodic(user gopacket.Endpoint, localUpBytes int64, localDownBytes int64, extUpBytes int64, extDownBytes int64) {
 	// TODO(matt9j) Consider logging local traffic just for analysis purposes.
 	// TODO(matt9j) Add this to the wait group and run db operations async.
-	status, err := storage.LogUsage(db,
+	status, err := storage.LogUsage(ctx.db,
 		storage.UseEvent{UserAddress: user, BytesUp: extUpBytes, BytesDown: extDownBytes})
 	if err != nil {
 		log.WithError(err).WithField("User", user).Error("Unable to log usage")
@@ -81,7 +88,7 @@ func LogUserPeriodic(user gopacket.Endpoint, localUpBytes int64, localDownBytes 
 
 func LogFlowPeriodic(start time.Time, stop time.Time, flow gopacket.Flow, bytesAB int, bytesBA int, wg *sync.WaitGroup) {
 	defer wg.Done()
-	storage.LogFlow(db, start, stop, flow, "", "", bytesAB, bytesBA)
+	storage.LogFlow(ctx.db, start, stop, flow, "", "", bytesAB, bytesBA)
 }
 
 func verifyBalance(user storage.UserStatus) {
@@ -98,7 +105,7 @@ func verifyBalance(user storage.UserStatus) {
 			log.WithField("Endpoint", user.UserAddress).Error("Unable to parse an IP from endpoint")
 		}
 		iptables.EnableForwardingFilter(addr)
-		storage.UpdateBridgedState(db, addr, false)
+		storage.UpdateBridgedState(ctx.db, addr, false)
 	case (user.CurrentDataBalance <= 1000000) && (user.PriorDataBalance > 1000000):
 		log.WithField("User", user.UserAddress).Info("Less than 1MB remaining")
 	case (user.CurrentDataBalance <= 5000000) && (user.PriorDataBalance > 5000000):

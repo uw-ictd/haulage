@@ -1,27 +1,24 @@
 package main
 
 import (
-	"database/sql"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"sync"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
 	"github.com/uw-ictd/haulage/internal/classify"
+	"gopkg.in/yaml.v2"
 )
 
 // The flow logs generate new records each time, and should be on a longer timer to save disk space.
-const FLOW_LOG_INTERVAL = 20 * time.Minute
 
 // User logs result in an update and can occur more frequently.
-const USER_LOG_INTERVAL = 1 * time.Minute
-
-const REENABLE_USER_POLL_INTERVAL = 5 * time.Second
 
 type FlowType int
 
@@ -42,16 +39,26 @@ type flowEvent struct {
 	amount int
 }
 
+var opts struct {
+	ConfigPath string `short:"c" long:"config" description:"The path to the configuration file" required:"true"`
+}
+
+var config struct {
+	FlowLogInterval time.Duration `yaml:"flowLogInterval"`
+	UserLogInterval time.Duration `yaml:"userLogInterval"`
+	Interface       string        `yaml:"interface"`
+	Custom          CustomConfig  `yaml:"custom"`
+}
+
 var (
-	device                = "gtp0"
-	snapshot_len    int32 = 1024
+	ctx             Context
+	snapshotLen     int32 = 1024
 	promiscuous           = true
 	snapshotTimeout       = 5 * time.Second
 	err             error
 	handle          *pcap.Handle
 	flowHandlers    = new(sync.Map)
 	userAggregators = new(sync.Map)
-	db              *sql.DB
 )
 
 // Parse the network layer of the packet and push it to the appropriate channel for each flow.
@@ -100,7 +107,7 @@ func flowHandler(ch chan flowEvent, flow gopacket.Flow, wg *sync.WaitGroup) {
 	bytesAB := 0
 	bytesBA := 0
 	intervalStart := time.Now()
-	ticker := time.NewTicker(FLOW_LOG_INTERVAL)
+	ticker := time.NewTicker(config.FlowLogInterval)
 	defer ticker.Stop()
 
 	for {
@@ -174,7 +181,7 @@ func aggregateUser(ch chan usageEvent, user gopacket.Endpoint, wg *sync.WaitGrou
 	localDownBytes := int64(0)
 	extUpBytes := int64(0)
 	extDownBytes := int64(0)
-	logTick := time.NewTicker(USER_LOG_INTERVAL)
+	logTick := time.NewTicker(config.UserLogInterval)
 	defer logTick.Stop()
 
 	for {
@@ -207,10 +214,35 @@ func aggregateUser(ch chan usageEvent, user gopacket.Endpoint, wg *sync.WaitGrou
 	}
 }
 
+func parseConfig(path string) {
+	configBytes, err := ioutil.ReadFile(path)
+	if err != nil {
+		log.WithField("path", path).WithError(err).Fatal("Failed to load configuration")
+	}
+
+	log.Debug("Parsing" + path)
+	err = yaml.Unmarshal(configBytes, &config)
+	if err != nil {
+		log.WithError(err).Fatal("Failed to parse configuration")
+	}
+}
+
 func main() {
-	// Open device
 	log.Info("Starting haulage")
-	handle, err = pcap.OpenLive(device, snapshot_len, promiscuous, snapshotTimeout)
+
+	// Setup flags
+	_, err := flags.Parse(&opts)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Debug("")
+	parseConfig(opts.ConfigPath)
+
+	params := Parameters{config.Custom.DBLocation, config.Custom.DBUser, config.Custom.DBPass, config.FlowLogInterval, config.UserLogInterval, config.Custom.ReenableUserPollInterval}
+	log.WithField("Parameters", config).Info("Parsed parameters")
+	// Open device
+	handle, err = pcap.OpenLive(config.Interface, snapshotLen, promiscuous, snapshotTimeout)
 	// Open file
 	// handle, err = pcap.OpenOffline("testdata/small.pcap")
 	if err != nil {
@@ -218,10 +250,8 @@ func main() {
 	}
 	defer handle.Close()
 
-	params := Parameters{"colte_db", "colte", "horse", FLOW_LOG_INTERVAL, USER_LOG_INTERVAL, REENABLE_USER_POLL_INTERVAL}
-	var ctx Context
-	OnStart(ctx, params)
-	defer Cleanup(ctx)
+	OnStart(&ctx, params)
+	defer Cleanup(&ctx)
 
 	var processingGroup sync.WaitGroup
 
@@ -231,7 +261,7 @@ func main() {
 	go func() {
 		<-sigintChan
 		handle.Close()
-		OnStop(ctx)
+		OnStop(&ctx)
 		<-sigintChan
 		log.Fatal("Terminating Uncleanly! Connections may be orphaned.")
 	}()
