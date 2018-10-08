@@ -150,3 +150,22 @@ func synchronizeFiltersToDb(db *sql.DB) {
 	}
 	log.Info("----------State synchronization ended----------")
 }
+
+type UserContext struct {
+	DataBalance int64
+}
+
+func (context *UserContext) Init(user gopacket.Endpoint) {
+	// TODO(gh/8) Abuse the store api and store an update of 0 to get the status.
+	status, err := storage.LogUsage(ctx.db,
+		storage.UseEvent{UserAddress: user, BytesUp: 0, BytesDown: 0})
+	if err != nil {
+		log.WithField("user", user).Warn("Failed to init user")
+	}
+
+	context.DataBalance = status.CurrentDataBalance
+}
+
+func (context *UserContext) ShouldLogNow(outstandingData int64) bool {
+	return outstandingData >= context.DataBalance
+}
