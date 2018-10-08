@@ -66,13 +66,20 @@ func LogUsage(db *sql.DB, event UseEvent) (UserStatus, error) {
 		}
 
 		// Business logic accounting for the event.
-		// TODO(matt9j) Continuing to log the raw up/down for the interval to match the python implementation, but
-		// should now no longer be necessary.
 		rawDown += event.BytesDown
 		rawUp += event.BytesUp
 		priorDataBalance := dataBalance
 		dataBalance -= event.BytesUp
 		dataBalance -= event.BytesDown
+
+		if dataBalance < 0 {
+			// Negative balance may occur since there is a race condition between when packets are counted
+			// and when the flow is cut off with iptables.
+			// For now per network policy don't allow a negative data balance. Some data may not be billed.
+			log.WithField("imsi", imsi).WithField("data_balance", dataBalance).Info(
+				"Zeroing out negative data balance")
+			dataBalance = 0
+		}
 
 		_, err = trx.Exec(
 			"UPDATE customers SET raw_down=?, raw_up=?, data_balance=?, enabled=?, bridged=? WHERE imsi=?",
