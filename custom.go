@@ -167,5 +167,5 @@ func (context *UserContext) Init(user gopacket.Endpoint) {
 }
 
 func (context *UserContext) ShouldLogNow(outstandingData int64) bool {
-	return outstandingData >= context.DataBalance
+	return (outstandingData >= context.DataBalance) && (context.DataBalance > 0)
 }
