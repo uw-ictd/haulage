@@ -76,7 +76,7 @@ func LogUsage(db *sql.DB, event UseEvent) (UserStatus, error) {
 			// Negative balance may occur since there is a race condition between when packets are counted
 			// and when the flow is cut off with iptables.
 			// For now per network policy don't allow a negative data balance. Some data may not be billed.
-			log.WithField("imsi", imsi).WithField("data_balance", dataBalance).Info(
+			log.WithField("imsi", imsi).WithField("data_balance", dataBalance).Debug(
 				"Zeroing out negative data balance")
 			dataBalance = 0
 		}
