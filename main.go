@@ -183,6 +183,8 @@ func aggregateUser(ch chan usageEvent, user gopacket.Endpoint, wg *sync.WaitGrou
 	extDownBytes := int64(0)
 	logTick := time.NewTicker(config.UserLogInterval)
 	defer logTick.Stop()
+	customContext := UserContext{DataBalance: 0}
+	customContext.Init(user)
 
 	for {
 		select {
@@ -197,6 +199,16 @@ func aggregateUser(ch chan usageEvent, user gopacket.Endpoint, wg *sync.WaitGrou
 				extUpBytes += delta
 			case EXT_DOWN:
 				extDownBytes += delta
+			}
+
+			// TODO(gh/8) Reduce duplication below with user context cleanup.
+			if customContext.ShouldLogNow(extUpBytes + extDownBytes) {
+				log.WithField("User", user).Debug(localUpBytes, localDownBytes, extUpBytes, extDownBytes)
+				LogUserPeriodic(user, localUpBytes, localDownBytes, extUpBytes, extDownBytes)
+				localUpBytes = 0
+				localDownBytes = 0
+				extUpBytes = 0
+				extDownBytes = 0
 			}
 		case <-logTick.C:
 			if (localUpBytes == 0) && (localDownBytes == 0) && (extUpBytes == 0) && (extDownBytes == 0) {
