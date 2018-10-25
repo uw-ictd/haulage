@@ -22,15 +22,22 @@ A golang tool for measuring, logging, and controlling network usage to allow bil
 
 # Usage
 ## Install from source with go
- 1) Install the go tools for your platform, available from [golang.org](https://golang.org/doc/install)
+ 1) Install the go tools (version >= 1.11) for your platform, available from [golang.org](https://golang.org/doc/install)
  2) `go get github.com/uw-ictd/haulage`
-
+ 3) As an alternative to (2), clone this repo and then `make build`
 ## Binary releases
-
-Forthcoming. If you're interested in helping us build a binary packaging infrastructure we would love your help!
+ 1) Download and install [fpm](https://github.com/jordansissel/fpm) for your platform.
+ 2) Build a binary package with `make package`.
+ 3) We currently host/maintain .deb packages for Ubuntu 18.04 and Debian 9. Use the following script to add our repo and install haulage.
+``` 
+echo "deb http://colte.cs.washington.edu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/colte.list
+sudo wget -O /etc/apt/trusted.gpg.d/colte.gpg http://colte.cs.washington.edu/keyring.gpg
+sudo apt-get update
+sudo apt-get install haulage
+```
 
 ## Configuration
-
+All haulage configurations are located in config.yml. If you installed our .deb package, this file is located in /etc/haulage.
 
 # Developing
 haulage is an open source project, and participation is always welcome. We strive to be an open and
