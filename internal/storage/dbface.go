@@ -24,6 +24,17 @@ type UserStatus struct {
 	CurrencyBalance    decimal.Decimal
 }
 
+type DnsEvent struct {
+	Timestamp  time.Time
+	SourceIP   net.IP
+	DestIP     net.IP
+	Query      string
+	OpCode     uint16
+	ResultCode uint16
+	AnswerTTLs string
+	AnswerIPs  string
+}
+
 func LogUsage(db *sql.DB, event UseEvent) (UserStatus, error) {
 	ip := net.ParseIP(event.UserAddress.String())
 	if ip == nil {
@@ -209,4 +220,47 @@ func QueryToppedUpCustomers(db *sql.DB) []net.IP {
 	}
 
 	return toppedUpUsers
+}
+
+func LogDnsResponse(db *sql.DB, event DnsEvent) error {
+	// Attempt to commit an update 3 times, barring other more serious errors.
+	for i := 0; i < 3; i++ {
+		trx, err := db.Begin()
+		if err != nil {
+			log.WithField("UseEvent", event).WithError(err).Error("Unable to begin transaction")
+			return err
+		}
+
+		_, err = trx.Exec("INSERT IGNORE INTO answers(`host`, `ip_addresses`, `ttls`) VALUES (?, ?, ?)", event.Query, event.AnswerIPs, event.AnswerTTLs)
+		if err != nil {
+			log.WithField("query", event.Query).WithError(err).Error("Unable to insert the general answer")
+			trx.Rollback()
+			return err
+		}
+
+		var answerIndex uint32
+		err = trx.QueryRow("select idx from answers where `host`=? AND `ip_addresses`=? AND `ttls`=?", event.Query, event.AnswerIPs, event.AnswerTTLs).Scan(&answerIndex)
+		if err != nil {
+			log.WithField("query", event.Query).WithError(err).Error("Unable to lookup dns answer key")
+			trx.Rollback()
+			return err
+		}
+
+		_, err = trx.Exec(
+			"INSERT INTO dnsResponses(`time`, `src_ip`, `dest_ip`, `opcode`, `resultcode`, `answer`)  VALUES (?, ?, ?, ?, ?, ?)", event.Timestamp, event.SourceIP, event.DestIP, event.OpCode, event.ResultCode, answerIndex)
+		if err != nil {
+			log.WithField("query", event.Query).WithError(err).Error("Unable to log dns event.")
+			trx.Rollback()
+			return err
+		}
+
+		err = trx.Commit()
+		if err != nil {
+			log.WithField("Attempt", i).WithField("query", event.Query).WithError(err).Warn("Unable to commit")
+		} else {
+			return err
+		}
+	}
+	log.WithField("query", event.Query).Error("Giving up committing dns response!")
+	return errors.New("data loss: unable to commit")
 }
