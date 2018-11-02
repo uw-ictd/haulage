@@ -29,7 +29,7 @@ A golang tool for measuring, logging, and controlling network usage to allow bil
  1) Download and install [fpm](https://github.com/jordansissel/fpm) for your platform.
  2) Build a binary package with `make package`.
  3) We currently host/maintain .deb packages for Ubuntu 18.04 and Debian 9. Use the following script to add our repo and install haulage.
-``` 
+```
 echo "deb http://colte.cs.washington.edu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/colte.list
 sudo wget -O /etc/apt/trusted.gpg.d/colte.gpg http://colte.cs.washington.edu/keyring.gpg
 sudo apt-get update
