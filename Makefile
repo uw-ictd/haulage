@@ -8,6 +8,7 @@ GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 BINARY_LOCATION=./haulage
+CONF_LOCATION=./config.yml
 DESCRIPTION="haulage: a minimalist traffic logging framework"
 
 all: build package
@@ -24,6 +25,7 @@ package: build
 	fpm --input-type dir \
 		--output-type deb \
 		--force \
+		--config-files $(CONF_LOCATION) \
 		--license MPL-2.0 \
 		--vendor uw-ictd \
 		--maintainer matt9j@cs.washington.edu \
@@ -34,8 +36,9 @@ package: build
 		--deb-systemd-restart-after-upgrade \
 		--name haulage \
 		--version $(VERSION) \
-		--depends 'libpcap' \
-		$(BINARY_LOCATION)
+		--depends 'libpcap0.8' \
+		$(BINARY_LOCATION)=/usr/bin/ \
+		$(CONF_LOCATION)=/etc/haulage/
 
 package-clean:
 	rm haulage_*\.deb
