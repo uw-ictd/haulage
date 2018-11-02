@@ -40,7 +40,7 @@ type flowEvent struct {
 }
 
 var opts struct {
-	ConfigPath string `short:"c" long:"config" description:"The path to the configuration file" required:"true"`
+	ConfigPath string `short:"c" long:"config" description:"The path to the configuration file" required:"true" default:"/etc/haulage/config.yml"`
 }
 
 var config struct {
