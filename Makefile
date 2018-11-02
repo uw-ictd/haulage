@@ -34,7 +34,7 @@ package: build
 		--deb-systemd-restart-after-upgrade \
 		--name haulage \
 		--version $(VERSION) \
-		--depends 'libpcap' \
+		--depends 'libpcap0.8' \
 		$(BINARY_LOCATION)
 
 package-clean:
