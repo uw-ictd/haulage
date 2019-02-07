@@ -1,0 +1,45 @@
+Hi Chenyang!
+
+Sorry it took me a bit to get back to you! I was scrambling to respond to some last-minute tasks.
+
+For your first task, I want you to add RADIUS server support to our haulage codebase at https://github.com/uw-ictd/haulage. RADIUS is a network protocol that is used for AAA (Authentication, Authorization, and Accounting), and will be the interface between our LTE stack and our network management software, which is haulage. Haulage is written in go, and a go RADIUS library can be found here: https://github.com/layeh/radius.
+
+Specifically, I want the haulage app to function as a RADIUS server, and to support IP address assignment. The main idea is when haulage receives an "Access-Request” message from a RADIUS client, haulage will query its database to discover the correct IP address that should be assigned to the client, and then return that IP address.
+
+I recommend you get started with the following steps (in-order):
+1) Download go version 1.11, download haulage from git, make sure you can edit and compile the source (we had some issues with this in the past). If you hit issues here, chat/email me so that I can help you through them.
+2) Add the radius library to haulage, and write code to setup a basic RADIUS server and listen on it.
+3) Find a RADIUS client application somewhere online (or write one using the same go library) and see if you can connect to your server. Once you get here, we might have to meet and discuss further if you might run into some security-related issues.
+4) Once the client can connect to the server, we’ll definitely have to meet to discuss what user IDs and IP addresses will look like. Ideally, the client will send an Access-Request message and the user-id field will have an IMSI, which is a 15-digit number that identifies a SIM card. See if you can get those requests and answer them with an Access-Accept message.
+5) Access-Accept messages have an optional field for IP address assignment; lookup the IP address - IMSI mapping in the “customers” database (haulage already knows how to do this) and fill in that field with the correct IP address! :-)
+
+Please let me know ASAP if you encounter any challenges here… and good luck! Once this part of the code is complete, we’ll have you work with Pat on adding RADIUS client support to the SPGW (which is the LTE component in charge of assigning IP addresses to phones).
+
+Thanks!
+Spencer
+
+
+
+Hi Chenyang!
+
+Here are a couple of articles that mention using RADIUS the way we want to. I’m also including a specific image that I found very helpful. In the image, our LTE core is playing the role of the “Authenticator” and Haulage is playing the role of the “Authentication Server.” The specific messages I want you to implement are messages 8 (Access-Request) and 10 (Access-Accept). Don’t worry about the other messages.
+
+Something important to understand is that different networks do authentication differently (e.g. WiFi uses EAP or 802.1x, and Ethernet uses PPPoE), but these protocols still use RADIUS messages to confirm the authentication with a third-party server. The image I included is how to do auth for 802.1X (which is used for WiFi). If you google “802.1x RADIUS” or “PPPoE RADIUS” you will get many good answers. Think of what we’re building as “LTE with RADIUS”, which hasn’t been invented yet. Don’t worry about all the other messages in the diagram because they are WiFi specific and LTE does its own thing entirely. You also don’t ever need to worry about actually authenticating the user (also called the “supplicant”) because we already handle that. We just want to mimic the RADIUS messaging in steps 8 and 10.
+
+The official spec: https://tools.ietf.org/html/rfc2865
+Helpful articles: https://help.ubnt.com/hc/en-us/articles/115007253447-Intro-to-Networking-AAA-802-1X-EAP-RADIUS https://www.cisco.com/c/en/us/support/docs/security-vpn/remote-authentication-dial-user-service-radius/12433-32.html
+https://www.youtube.com/watch?v=aqkF_ITU0i8
+Also, googling “introduction to RADIUS” has lots of good instructions.
+
+Thanks!
+Spencer
+
+
+Confusions:
+
+1. what is Attribute
+2. Do we need to look into the format of the packets about fields encapsulated? I dont think so since the library RAIDIUS provided provides lots of methods which can help us grab what we needed from the packets(Thats why we use go)
+3. The RADIUS has many methods like Usernmae_GetString which we can use for grabbing username from packet. Similarly we can grab FilterID(not sure what it is), password by using those methods. However, since our purpose is to grab IMSI and IP(optional). WHat methods should we use for grabbing those data? More specifically, what fields do they belong to?
+
+Spencer's answer:
+sorry for the delayed response here, and yes! i do think you are on the right track. (1) I’m not sure but I think “Attributes” are various fields you can add to a RADIUS message. RADIUS is meant to support a bazillion different types of messages. (2) you are correct, we do not need to look into the specific format on-the-wire. RADIUS uses a pretty complicated coding, but this is exactly the reason why we’re using the go library. (3) for now, i would set the IMSI as the username. im not 100% sure what field the IP address should be set into. a quick google search for “RADIUS assign ip” found this link https://www.ibm.com/support/knowledgecenter/ssw_aix_72/com.ibm.aix.security/radius_ip_pooling.htm which says “The IP address is returned in the Framed-IP-Address attribute of the Access-Accept packet.”
