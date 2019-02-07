@@ -1,11 +1,10 @@
 // radius go file. 
+package main
 
-
-
-
-
-
-
+import (
+	"layeh.com/radius"
+	"layeh.com/radius/rfc2865"
+)
 
 func start_radius_server() {
 	// define handler 

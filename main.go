@@ -15,8 +15,6 @@ import (
 	"github.com/uw-ictd/haulage/internal/classify"
 	"gopkg.in/yaml.v2"
 	 // "radius.go"
-	"layeh.com/radius"
-	"layeh.com/radius/rfc2865"
 )
 
 // The flow logs generate new records each time, and should be on a longer timer to save disk space.
