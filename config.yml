@@ -1,6 +1,6 @@
 flowLogInterval: "20m"
 userLogInterval: "1m"
-interface: "wlp1s0"
+interface: "en0"
 
 custom:
   reenablePollInterval: "5s"

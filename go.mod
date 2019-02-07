@@ -13,4 +13,5 @@ require (
 	golang.org/x/sys v0.0.0-20180925112736-b09afc3d579e // indirect
 	google.golang.org/appengine v1.2.0 // indirect
 	gopkg.in/yaml.v2 v2.2.1
+	layeh.com/radius v0.0.0-20190118135028-0f678f039617
 )
