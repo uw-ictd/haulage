@@ -4,6 +4,7 @@ package main
 import (
 	"layeh.com/radius"
 	"layeh.com/radius/rfc2865"
+	 log "github.com/sirupsen/logrus"
 )
 
 func start_radius_server() {

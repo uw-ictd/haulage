@@ -11,7 +11,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"github.com/jessevdk/go-flags"
-	log "github.com/sirupsen/logrus"
+	 log "github.com/sirupsen/logrus"
 	"github.com/uw-ictd/haulage/internal/classify"
 	"gopkg.in/yaml.v2"
 	 // "radius.go"
