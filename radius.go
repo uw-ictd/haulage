@@ -25,12 +25,12 @@ func start_radius_server(db *sql.DB) {
 		username := rfc2865.UserName_GetString(r.Packet)
 		// password := rfc2865.UserPassword_GetString(r.Packet)
 		var code radius.Code
-		_, err := db.Query("SELECT ip  FROM customers WHERE customers.imsi = ?", username)
+		_, err := db.Query("SELECT *  FROM customers WHERE customers.imsi = ?", username)
 		if err != nil {
 			log.WithError(err).Error("Cannot find this customer in our db")
 			code = radius.CodeAccessReject
 		} else {
-			code = radius.CodeAccessReject
+			code = radius.CodeAccessAccept
 		}
 
 	    //code = radius.CodeAccessAccept

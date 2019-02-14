@@ -1,0 +1,5 @@
+mysql -u colte_db -p
+password: (colte_db)
+use colte_db;
+select * from customers;
+select * from static_ips;
