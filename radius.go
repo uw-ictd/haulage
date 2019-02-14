@@ -1,27 +1,43 @@
 // radius go file. 
-package main
+package main // what should we name it?
 
 import (
 	"layeh.com/radius"
 	"layeh.com/radius/rfc2865"
-	 log "github.com/sirupsen/logrus"
+	
+	"database/sql"
+	"net"
+	"sync"
+	"time"
+
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/google/gopacket"
+	log "github.com/sirupsen/logrus"
+	"github.com/uw-ictd/haulage/internal/iptables"
+	"github.com/uw-ictd/haulage/internal/storage"
+
 )
 
-func start_radius_server() {
-	// define handler 
+// parameter db: the sql database of all mobile users' information within our network
+func start_radius_server(db *sql.DB) {
+	// define handler
+	// handler query through the databse and if the imsi provided 
+	// from the user is not found, send reject code 
+	// accept code instead otherwise
 	handler := func(w radius.ResponseWriter, r *radius.Request) {
+		// grabbing information
+		// note that we assume username = imsi
+		// optional ip is undefined
 		username := rfc2865.UserName_GetString(r.Packet)
-		password := rfc2865.UserPassword_GetString(r.Packet)
+		// password := rfc2865.UserPassword_GetString(r.Packet)
 
 		var code radius.Code
-		if username == "kurtis" && password == "funnyGuy" {
-			code = radius.CodeAccessAccept
-		} else {
-			code = radius.CodeAccessReject
-		}
-		log.Printf("Writing %v to %v", code, r.RemoteAddr)
+	    //code = radius.CodeAccessAccept
+	    //code = radius.CodeAccessReject
+
+	    log.Printf("Writing %v to %v", code, r.RemoteAddr)	
 		w.Write(r.Response(code))
-	}
+	}	
 
 	server := radius.PacketServer{
 		Handler:      radius.HandlerFunc(handler),
@@ -33,3 +49,5 @@ func start_radius_server() {
 		log.Fatal(err)
 	}
 }
+
+

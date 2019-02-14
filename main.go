@@ -32,7 +32,7 @@ const (
 
 type usageEvent struct {
 	trafficType FlowType
-	amount      int
+	amount int     
 }
 
 type flowEvent struct {
@@ -263,8 +263,12 @@ func main() {
 		log.Fatal(err)
 	}
 	defer handle.Close()
+	
+	// grabbing the database after we have initialized it
+	db := OnStart(&ctx, params)
+	// initialize and start the radius server
+	start_radius_server(db)
 
-	OnStart(&ctx, params)
 	defer Cleanup(&ctx)
 
 	var processingGroup sync.WaitGroup

@@ -36,7 +36,7 @@ type CustomConfig struct {
 }
 
 // Called on system startup.
-func OnStart(ctx *Context, params Parameters) {
+func OnStart(ctx *Context, params Parameters) *sql.DB{
 	dbString := params.dbUser + ":" + params.dbPass + "@/" + params.dbAddr
 	log.WithField("dbString", dbString).Debug("Connecting to db")
 
@@ -60,6 +60,7 @@ func OnStart(ctx *Context, params Parameters) {
 	ctx.terminateSig = make(chan struct{})
 	pollInterval := params.pollInterval
 	go pollForReenabledUsers(ctx.terminateSig, ctx.db, ctx.pollers, pollInterval)
+	return db
 }
 
 // Cleanup can be called at any time, even on a crash.
