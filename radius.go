@@ -6,15 +6,9 @@ import (
 	"layeh.com/radius/rfc2865"
 	
 	"database/sql"
-	"net"
-	"sync"
-	"time"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/google/gopacket"
 	log "github.com/sirupsen/logrus"
-	"github.com/uw-ictd/haulage/internal/iptables"
-	"github.com/uw-ictd/haulage/internal/storage"
 
 )
 
@@ -30,8 +24,15 @@ func start_radius_server(db *sql.DB) {
 		// optional ip is undefined
 		username := rfc2865.UserName_GetString(r.Packet)
 		// password := rfc2865.UserPassword_GetString(r.Packet)
-
 		var code radius.Code
+		_, err := db.Query("SELECT ip  FROM customers WHERE customers.imsi = ?", username)
+		if err != nil {
+			log.WithError(err).Error("Cannot find this customer in our db")
+			code = radius.CodeAccessReject
+		} else {
+			code = radius.CodeAccessReject
+		}
+
 	    //code = radius.CodeAccessAccept
 	    //code = radius.CodeAccessReject
 

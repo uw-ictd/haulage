@@ -16,7 +16,7 @@ import (
 func main() {
 	fmt.Printf("test start ... \n")
 	packet := radius.New(radius.CodeAccessRequest, []byte(`secret`))
-	rfc2865.UserName_SetString(packet, "kurtis")
+	rfc2865.UserName_SetString(packet, "123456778")
 	rfc2865.UserPassword_SetString(packet, "funnyGuy")
 	response, err := radius.Exchange(context.Background(), packet, "localhost:1812")
 	if err != nil {
