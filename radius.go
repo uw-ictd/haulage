@@ -12,6 +12,9 @@ import (
 
 )
 
+// bugs: placeholders for the sql lib
+
+
 // confusions:
 // q1: is that possible for an imsi that does not have an ip?
 // q2: what should we set the secret
