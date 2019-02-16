@@ -27,24 +27,25 @@ func start_radius_server(db *sql.DB) {
 	// from the user is not found, send reject code 
 	// accept code instead otherwise
 	handler := func(w radius.ResponseWriter, r *radius.Request) {
-		log.Printf("Request")
+		log.Printf("We have one Request")
 		// grabbing information
 		// note that we assume username = imsi
 		// optional ip is undefined
 		imsi := rfc2865.UserName_GetString(r.Packet)
+		log.Printf("The imsi is " + imsi)
 		// query through database to find if this imsi matches some IP
 		// if it does, write back the IP
 		// Reject otherwise
 		// QueryString := "SELECT ip FROM static_ips WHERE imsi = " + imsi
 		rows, err := db.Query("SELECT ip FROM static_ips WHERE imsi = ?", imsi)
 		defer rows.Close()
-		var res *radius.Packet
+		var res *radius.Packet = radius.New(radius.CodeAccessAccept, r.Secret)
+	    res.Authenticator = r.Authenticator
 		if err != nil {
 			// sth wrong with our database 
 			log.WithError(err).Error("We cannot query through our databse")
 			// what should we behave here? reject the user? or should we just return?
-			return 
-			// res = radius.New(radius.CodeAccessReject, []byte(`res`)) // what should we set the secret?
+		    res.Code = radius.CodeAccessReject // what should we set the secret?
 		} 
 		//else {
 			// we should accept the user
@@ -56,11 +57,10 @@ func start_radius_server(db *sql.DB) {
 		if rows.Next() {
 			if err1 := rows.Scan(&ip); err1 != nil {
 				log.Fatal("sql.rows.Scan() does not work")
-				// return
-				return
-			} else  {
+		    	res.Code = radius.CodeAccessReject // what should we set the secret?
+			} else {
 				// we have found the ip
-				res = radius.New(radius.CodeAccessAccept, []byte(`res`))
+				res.Code = radius.CodeAccessAccept
 				log.Printf("The IP we found for imsi: %s is IP: %s", imsi, ip)
 				// transform ip from string to IPv4 form
 				IP_found := net.ParseIP(ip)
@@ -70,15 +70,16 @@ func start_radius_server(db *sql.DB) {
 					log.Fatal("Cannot add the ip to the packet")
 					// we should handle this situation
 					// what to send back then?
+		    		res.Code = radius.CodeAccessReject // what should we set the secret?
 				}
 			}
 		} else {
 			// could be sql's problem or we cannot find an ip mapped to this given imsi
 			log.WithError(err).Error("sql.Rows.Next() cannot prepare next row or we cannot find ip mapped to the given imsi from user")
-			res = radius.New(radius.CodeAccessReject, []byte(`res`))
+			 res.Code = radius.CodeAccessReject
 		}
 
-		err = w.Write(res)	
+	    err = w.Write(res)	
 		if err != nil {
 			log.Fatal("Cannot write back the message")
 			return
