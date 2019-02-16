@@ -9,7 +9,7 @@ import (
 
 	"layeh.com/radius"
 	"layeh.com/radius/rfc2865"
-	
+	// "net"
 	"fmt"
 )
 
@@ -23,8 +23,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
+	
     log.Println("Code:", response.Code)
+	// var ip_found net.IP
+	ip_found := rfc2865.FramedIPAddress_Get(response)
+	log.Println("IP:", ip_found.String())
 }
 
 
