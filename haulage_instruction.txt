@@ -43,3 +43,11 @@ Confusions:
 
 Spencer's answer:
 sorry for the delayed response here, and yes! i do think you are on the right track. (1) I’m not sure but I think “Attributes” are various fields you can add to a RADIUS message. RADIUS is meant to support a bazillion different types of messages. (2) you are correct, we do not need to look into the specific format on-the-wire. RADIUS uses a pretty complicated coding, but this is exactly the reason why we’re using the go library. (3) for now, i would set the IMSI as the username. im not 100% sure what field the IP address should be set into. a quick google search for “RADIUS assign ip” found this link https://www.ibm.com/support/knowledgecenter/ssw_aix_72/com.ibm.aix.security/radius_ip_pooling.htm which says “The IP address is returned in the Framed-IP-Address attribute of the Access-Accept packet.”
+
+
+
+Task 3:
+1. have a monthly row 1/0
+2. if it is 0, cut off the user using system call, otherwise use run_down run_up to update the usage the user uses so far
+3. also set a timer to update the balance and if it reaches the limit, cut it off
+4. iptables.DisableForwardingFilter cut off the user from the network
