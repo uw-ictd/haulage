@@ -77,10 +77,15 @@ func classifyPacket(packet gopacket.Packet, wg *sync.WaitGroup) {
 
 	// Check for errors
 	if err := packet.ErrorLayer(); err != nil {
-		log.Error("Error decoding some part of the packet:", err)
+		log.Debug("Error decoding some part of the packet:", err)
 	}
 
 	sendToFlowHandler(flowEvent{packet.NetworkLayer().NetworkFlow(), len(packet.NetworkLayer().LayerPayload())}, wg)
+	var msg classify.DnsMsg
+	if err := classify.ParseDns(packet, &msg); err == nil {
+		// Errors are expected, since most packets are not valid DNS.
+		LogDNS(&msg, wg)
+	}
 }
 
 func sendToFlowHandler(event flowEvent, wg *sync.WaitGroup) {

@@ -9,6 +9,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/gopacket"
 	log "github.com/sirupsen/logrus"
+	"github.com/uw-ictd/haulage/internal/classify"
 	"github.com/uw-ictd/haulage/internal/iptables"
 	"github.com/uw-ictd/haulage/internal/storage"
 )
@@ -89,6 +90,35 @@ func LogUserPeriodic(user gopacket.Endpoint, localUpBytes int64, localDownBytes 
 func LogFlowPeriodic(start time.Time, stop time.Time, flow gopacket.Flow, bytesAB int, bytesBA int, wg *sync.WaitGroup) {
 	defer wg.Done()
 	storage.LogFlow(ctx.db, start, stop, flow, "", "", bytesAB, bytesBA)
+}
+
+func LogDNS(dnsEvent *classify.DnsMsg, wg *sync.WaitGroup) {
+	if (dnsEvent.NumberOfAnswers > 0) || (dnsEvent.DnsResponseCode != 0) {
+		wg.Add(1)
+		defer wg.Done()
+
+		answers := ""
+		for _, answer := range dnsEvent.DnsAnswer {
+			answers += answer.String() + ","
+		}
+
+		ttls := ""
+		for _, ttl := range dnsEvent.DnsAnswerTTL {
+			ttls += string(ttl) + ","
+		}
+
+		event := storage.DnsEvent{
+			Timestamp:  dnsEvent.Timestamp,
+			SourceIP:   dnsEvent.SourceIP,
+			DestIP:     dnsEvent.DestinationIP,
+			Query:      dnsEvent.DnsQuery,
+			OpCode:     dnsEvent.DnsOpCode,
+			ResultCode: dnsEvent.DnsResponseCode,
+			AnswerTTLs: ttls,
+			AnswerIPs:  answers,
+		}
+		storage.LogDnsResponse(ctx.db, event)
+	}
 }
 
 func verifyBalance(user storage.UserStatus) {
