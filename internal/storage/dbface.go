@@ -238,7 +238,7 @@ func LogDnsResponse(db *sql.DB, event DnsEvent) error {
 			return err
 		}
 
-		var answerIndex uint32
+		var answerIndex uint64
 		err = trx.QueryRow("select idx from answers where `host`=? AND `ip_addresses`=? AND `ttls`=?", event.Query, event.AnswerIPs, event.AnswerTTLs).Scan(&answerIndex)
 		if err != nil {
 			log.WithField("query", event.Query).WithError(err).Error("Unable to lookup dns answer key")
