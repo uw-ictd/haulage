@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -104,7 +105,7 @@ func LogDNS(dnsEvent *classify.DnsMsg, wg *sync.WaitGroup) {
 
 		ttls := ""
 		for _, ttl := range dnsEvent.DnsAnswerTTL {
-			ttls += string(ttl) + ","
+			ttls += strconv.FormatUint(uint64(ttl), 10) + ","
 		}
 
 		event := storage.DnsEvent{
