@@ -19,7 +19,7 @@ A golang tool for measuring, logging, and controlling network usage to allow bil
 * When you are interested in aggregate usage, not packet by packet logging or detailed timing.
 * When you need to operate in human time (pseudo real time).
 * When you operate in a constrained environment where alternative (and more fully featured) tools may be overkill.
-i
+
 # Usage
 ## Install from source with go
  1) Install the go tools for your platform, available from [golang.org](https://golang.org/doc/install)
@@ -31,7 +31,7 @@ Forthcoming. If you're interested in helping us build a binary packaging infrast
 
 ## Configuration
 
-i
+
 # Developing
 haulage is an open source project, and participation is always welcome. We strive to be an open and
 respectful community, so please read and follow our [Community Code of Conduct](CODE_OF_CONDUCT.md).
