@@ -269,8 +269,10 @@ func main() {
 	}
 	defer handle.Close()
 
+	log.Info("Initializing context")
 	OnStart(&ctx, params)
 	defer Cleanup(&ctx)
+	log.Info("Context initialization complete")
 
 	var processingGroup sync.WaitGroup
 
@@ -292,6 +294,7 @@ func main() {
 		Name:       "tun",
 	}
 
+	log.Info("Beginning packet by packet operation")
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
 		// Do something with a packet here.
