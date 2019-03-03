@@ -66,7 +66,9 @@ func OnStart(ctx *Context, params Parameters) {
 
 // Cleanup can be called at any time, even on a crash.
 func Cleanup(ctx *Context) {
-	ctx.db.Close()
+	if err := ctx.db.Close(); err != nil {
+		log.WithError(err).Error("Failed to close DB")
+	}
 }
 
 // Stop is called gracefully at the end of the server lifecycle.
@@ -119,7 +121,9 @@ func LogDNS(dnsEvent *classify.DnsMsg, wg *sync.WaitGroup) {
 			AnswerTTLs: ttls,
 			AnswerIPs:  answers,
 		}
-		storage.LogDnsResponse(ctx.db, event)
+		if err := storage.LogDnsResponse(ctx.db, event); err != nil {
+			log.WithError(err).WithField("event", event).Error("failed to record DNS event")
+		}
 	}
 }
 
@@ -137,7 +141,9 @@ func verifyBalance(user storage.UserStatus) {
 			log.WithField("Endpoint", user.UserAddress).Error("Unable to parse an IP from endpoint")
 		}
 		iptables.EnableForwardingFilter(addr)
-		storage.UpdateBridgedState(ctx.db, addr, false)
+		if err := storage.UpdateBridgedState(ctx.db, addr, false); err != nil {
+			log.WithError(err).WithField("user", user).Error("unable to update user state in backing store")
+		}
 	case (user.CurrentDataBalance <= 1000000) && (user.PriorDataBalance > 1000000):
 		log.WithField("User", user.UserAddress).Info("Less than 1MB remaining")
 	case (user.CurrentDataBalance <= 5000000) && (user.PriorDataBalance > 5000000):
@@ -162,7 +168,10 @@ func pollForReenabledUsers(terminateSignal chan struct{}, db *sql.DB, wg *sync.W
 			for _, userIp := range usersToEnable {
 				log.WithField("User", userIp).Info("Re-enabling user traffic")
 				iptables.DisableForwardingFilter(userIp)
-				storage.UpdateBridgedState(db, userIp, true)
+				if err := storage.UpdateBridgedState(db, userIp, true); err != nil {
+					log.WithError(err).WithField("user", userIp).Error(
+						"unable to update user state in backing store")
+				}
 			}
 		}
 	}
