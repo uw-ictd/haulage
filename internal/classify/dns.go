@@ -12,8 +12,7 @@ import (
 
 type DnsMsg struct {
 	Timestamp       time.Time
-	SourceIP        net.IP
-	DestinationIP   net.IP
+	Flow            FiveTuple
 	DnsQuery        string
 	DnsOpCode       uint16
 	DnsResponseCode uint16
@@ -27,7 +26,7 @@ type DnsMsg struct {
 // Nominally returns a parsed DnsMsg struct with the DNS information.
 // If no DNS information is detected in the packet returns a NoDNSError.
 // Otherwise returns generic error codes for parsing failure.
-func ParseDns(pkt gopacket.Packet, msg *DnsMsg) error {
+func ParseDns(pkt gopacket.Packet, flow FiveTuple, msg *DnsMsg) error {
 	dnsLayer := pkt.Layer(layers.LayerTypeDNS)
 
 	if dnsLayer == nil {
@@ -48,10 +47,8 @@ func ParseDns(pkt gopacket.Packet, msg *DnsMsg) error {
 
 	dnsQuestion := dns.Questions[0]
 
-	// Add a document to the index
 	msg.Timestamp = time.Now()
-	msg.SourceIP = net.ParseIP(pkt.NetworkLayer().NetworkFlow().Src().String())
-	msg.DestinationIP = net.ParseIP(pkt.NetworkLayer().NetworkFlow().Src().String())
+	msg.Flow = flow
 	msg.DnsQuery = string(dnsQuestion.Name)
 	msg.DnsOpCode = uint16(dns.OpCode)
 	msg.DnsResponseCode = uint16(dns.ResponseCode)

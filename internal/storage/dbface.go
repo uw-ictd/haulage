@@ -27,8 +27,7 @@ type UserStatus struct {
 
 type DnsEvent struct {
 	Timestamp  time.Time
-	SourceIP   net.IP
-	DestIP     net.IP
+	Flow       classify.FiveTuple
 	Query      string
 	OpCode     uint16
 	ResultCode uint16
@@ -260,8 +259,20 @@ func LogDnsResponse(db *sql.DB, event DnsEvent) error {
 			return err
 		}
 
+		transportSrcPort, err := event.Flow.TransportSrcPort()
+		if err != nil {
+			log.WithField("value", event.Flow.Transport.Src().String()).WithError(err).Error(
+				"Failed to convert transport port number")
+		}
+
+		transportDstPort, err := event.Flow.TransportDstPort()
+		if err != nil {
+			log.WithField("value", event.Flow.Transport.Dst().String()).WithError(err).Error(
+				"Failed to convert transport port number")
+		}
+
 		_, err = trx.Exec(
-			"INSERT INTO dnsResponses(`time`, `src_ip`, `dest_ip`, `opcode`, `resultcode`, `answer`)  VALUES (?, ?, ?, ?, ?, ?)", event.Timestamp, event.SourceIP, event.DestIP, event.OpCode, event.ResultCode, answerIndex)
+			"INSERT INTO dnsResponses(`time`, `srcIp`, `dstIp`, `transportProtocol`, `srcPort`, `dstPort`, `opcode`, `resultcode`, `answer`)  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", event.Timestamp, event.Flow.Network.Src().Raw(), event.Flow.Network.Dst().Raw(), event.Flow.TransportProtocol, transportSrcPort, transportDstPort, event.OpCode, event.ResultCode, answerIndex)
 		if err != nil {
 			log.WithField("query", event.Query).WithError(err).Error("Unable to log dns event.")
 			trx.Rollback()

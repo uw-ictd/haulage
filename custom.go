@@ -113,8 +113,7 @@ func LogDNS(dnsEvent *classify.DnsMsg, wg *sync.WaitGroup) {
 
 		event := storage.DnsEvent{
 			Timestamp:  dnsEvent.Timestamp,
-			SourceIP:   dnsEvent.SourceIP,
-			DestIP:     dnsEvent.DestinationIP,
+			Flow:       dnsEvent.Flow,
 			Query:      dnsEvent.DnsQuery,
 			OpCode:     dnsEvent.DnsOpCode,
 			ResultCode: dnsEvent.DnsResponseCode,

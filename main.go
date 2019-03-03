@@ -121,7 +121,7 @@ func classifyPacket(packet gopacket.Packet, wg *sync.WaitGroup) {
 
 	sendToFlowHandler(flowEvent{flow, len(packet.NetworkLayer().LayerPayload())}, wg)
 	var msg classify.DnsMsg
-	if err := classify.ParseDns(packet, &msg); err == nil {
+	if err := classify.ParseDns(packet, flow, &msg); err == nil {
 		// Errors are expected, since most packets are not valid DNS.
 		LogDNS(&msg, wg)
 	}
