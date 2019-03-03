@@ -183,7 +183,7 @@ func synchronizeFiltersToDb(db *sql.DB) {
 	log.Info("----------Beginning state synchronization----------")
 	for _, user := range storedState {
 		log.WithField("User", user.Addr).WithField("Bridged:", user.Bridged).Info("Setting user bridging")
-		if user.Bridged {
+		if user.Bridged && iptables.ForwardingFilterPresent(user.Addr) {
 			iptables.DisableForwardingFilter(user.Addr)
 		} else {
 			iptables.EnableForwardingFilter(user.Addr)
