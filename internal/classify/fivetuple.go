@@ -1,6 +1,8 @@
 package classify
 
 import (
+	"bytes"
+	"encoding/binary"
 	"github.com/google/gopacket"
 )
 
@@ -12,17 +14,17 @@ type FiveTuple struct {
 }
 
 // True if the other FiveTuple flow is in the same bidirectional flow.
-func (original FiveTuple) SameBidirectionalFlow(other FiveTuple) bool {
+func (t FiveTuple) SameBidirectionalFlow(other FiveTuple) bool {
 	// Same direction case
-	if original.Network == other.Network {
-		return (original.TransportProtocol == other.TransportProtocol) &&
-			(original.Transport == other.Transport)
+	if t.Network == other.Network {
+		return (t.TransportProtocol == other.TransportProtocol) &&
+			(t.Transport == other.Transport)
 	}
 
 	// Reverse direction case
-	if original.Network.Reverse() == other.Network {
-		return (original.TransportProtocol == other.TransportProtocol) &&
-			(original.Transport.Reverse() == other.Transport)
+	if t.Network.Reverse() == other.Network {
+		return (t.TransportProtocol == other.TransportProtocol) &&
+			(t.Transport.Reverse() == other.Transport)
 	}
 
 	return false
@@ -31,21 +33,42 @@ func (original FiveTuple) SameBidirectionalFlow(other FiveTuple) bool {
 // Represent the flow in an ordered form, possibly flipping the source and destination.
 //
 // Two five tuples representing both directions of a flow will have the same canonical form.
-func (original FiveTuple) MakeCanonical() FiveTuple {
+func (t FiveTuple) MakeCanonical() FiveTuple {
 	// Handle loopback separately to order by the Transport endpoints
-	if original.Network.Src() == original.Network.Dst() {
-		if original.Transport.Src().LessThan(original.Transport.Dst()) {
-			return original
+	if t.Network.Src() == t.Network.Dst() {
+		if t.Transport.Src().LessThan(t.Transport.Dst()) {
+			return t
 		}
 
-		return FiveTuple{original.Network.Reverse(), original.Transport.Reverse(), original.TransportProtocol}
+		return FiveTuple{t.Network.Reverse(), t.Transport.Reverse(), t.TransportProtocol}
 	}
 
 	// Otherwise order by the Network layer endpoints
-	if original.Network.Src().LessThan(original.Network.Dst()) {
-		return original
+	if t.Network.Src().LessThan(t.Network.Dst()) {
+		return t
 	}
 
-	return FiveTuple{original.Network.Reverse(), original.Transport.Reverse(), original.TransportProtocol}
+	return FiveTuple{t.Network.Reverse(), t.Transport.Reverse(), t.TransportProtocol}
+}
+
+// Extract the transport src port number from the transport flow. This may not be valid for all transports.
+func (t FiveTuple) TransportSrcPort() (uint16, error) {
+	return endpointToUint16(t.Transport.Src())
+}
+
+// Extract the transport dst port number from the transport flow. This may not be valid for all transports.
+func (t FiveTuple) TransportDstPort() (uint16, error) {
+	return endpointToUint16(t.Transport.Dst())
+}
+
+// Convert a gopacket.endpoint to a uint16
+func endpointToUint16(endpoint gopacket.Endpoint) (uint16, error) {
+	var result uint16
+	reader := bytes.NewReader(endpoint.Raw())
+	if err := binary.Read(reader, binary.BigEndian, &result); err != nil {
+		return 0, err
+	}
+
+	return result, nil
 }
 
