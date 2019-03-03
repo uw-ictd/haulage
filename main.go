@@ -34,10 +34,9 @@ type usageEvent struct {
 	amount      int
 }
 
-
 type flowEvent struct {
-	flow classify.FiveTuple
-	amount      int
+	flow   classify.FiveTuple
+	amount int
 }
 
 var opts struct {
@@ -56,7 +55,6 @@ var (
 	snapshotLen     int32 = 1024
 	promiscuous           = true
 	snapshotTimeout       = 5 * time.Second
-	err             error
 	handle          *pcap.Handle
 	flowHandlers    = new(sync.Map)
 	userAggregators = new(sync.Map)
@@ -115,9 +113,11 @@ func classifyPacket(packet gopacket.Packet, wg *sync.WaitGroup) {
 		transportProtocol = uint8(ipPacket.NextHeader)
 	}
 
-	flow := classify.FiveTuple{packet.NetworkLayer().NetworkFlow(),
-		packet.TransportLayer().TransportFlow(),
-		transportProtocol}
+	flow := classify.FiveTuple{
+		Network:           packet.NetworkLayer().NetworkFlow(),
+		Transport:         packet.TransportLayer().TransportFlow(),
+		TransportProtocol: transportProtocol,
+	}
 
 	sendToFlowHandler(flowEvent{flow, len(packet.NetworkLayer().LayerPayload())}, wg)
 	var msg classify.DnsMsg
@@ -294,11 +294,18 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Debug("")
 	parseConfig(opts.ConfigPath)
 
-	params := Parameters{config.Custom.DBLocation, config.Custom.DBUser, config.Custom.DBPass, config.FlowLogInterval, config.UserLogInterval, config.Custom.ReenableUserPollInterval}
+	params := Parameters{
+		config.Custom.DBLocation,
+		config.Custom.DBUser,
+		config.Custom.DBPass,
+		config.FlowLogInterval,
+		config.UserLogInterval,
+		config.Custom.ReenableUserPollInterval,
+	}
 	log.WithField("Parameters", config).Info("Parsed parameters")
+
 	// Open device
 	handle, err = pcap.OpenLive(config.Interface, snapshotLen, promiscuous, snapshotTimeout)
 	// Open file
