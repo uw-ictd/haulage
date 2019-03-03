@@ -2,6 +2,7 @@ package main
 
 import (
 	"io/ioutil"
+	"net"
 	"os"
 	"os/signal"
 	"sync"
@@ -32,6 +33,69 @@ const (
 type usageEvent struct {
 	trafficType FlowType
 	amount      int
+}
+
+// Completely describes a transport level network flow.
+type fiveTuple struct {
+	sourceIP net.IP
+	destIP net.IP
+	sourcePort uint16
+	destPort uint16
+	protocol uint16
+}
+
+// True if the other fiveTuple flow is in the same bidirectional flow.
+func (original fiveTuple) sameBidirectionalFlow(other fiveTuple) bool {
+	// Same direction case
+	if original.destIP.Equal(other.destIP) && original.sourceIP.Equal(other.sourceIP) {
+		return (original.protocol == other.protocol) &&
+			(original.sourcePort == other.sourcePort) &&
+			(original.destPort == other.destPort)
+	}
+
+	// Reverse direction case
+	if original.destIP.Equal(other.sourceIP) && original.sourceIP.Equal(other.destIP) {
+		return (original.protocol == other.protocol) &&
+			(original.sourcePort == other.destPort) &&
+			(original.destPort == other.sourcePort)
+	}
+
+	return false
+}
+
+// Represent the flow in an ordered form, possibly flipping the source and destination.
+//
+// Two five tuples representing both directions of a flow will have the same canonical form.
+func (original fiveTuple) makeCanonical() fiveTuple {
+	// Handle loopback separately to order by port
+	if original.sourceIP.Equal(original.destIP) {
+		if original.sourcePort <= original.destPort {
+			return original
+		}
+
+		return fiveTuple{original.destIP,
+			original.sourceIP,
+			original.destPort,
+			original.sourcePort,
+			original.protocol}
+	}
+
+	// Otherwise order by IP
+	// Convert to strings since the net.IP type does not have a native ordering
+	sourceIPString := original.sourceIP.String()
+	destIPString := original.destIP.String()
+
+	if sourceIPString < destIPString {
+		return original
+	} else if sourceIPString > destIPString {
+		return fiveTuple{original.destIP,
+			original.sourceIP,
+			original.destPort,
+			original.sourcePort,
+			original.protocol}
+	} else {
+		panic("IP equality does not match string equality")
+	}
 }
 
 type flowEvent struct {
