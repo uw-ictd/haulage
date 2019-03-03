@@ -19,8 +19,7 @@ func EnableForwardingFilter(addr net.IP) {
 		return
 	}
 
-	cmd = exec.Command("iptables", "-I", "FORWARD", "-s", addr.String(), "-j", "REJECT")
-	//cmd := exec.Command("echo", "Filtered IP " + addr.String())
+	cmd := exec.Command("iptables", "-I", "FORWARD", "-s", addr.String(), "-j", "REJECT")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.WithError(err).Error("Failed to run ip address insert filter and capture output")
@@ -33,7 +32,6 @@ func EnableForwardingFilter(addr net.IP) {
 
 func DisableForwardingFilter(addr net.IP) {
 	cmd := exec.Command("iptables", "-D", "FORWARD", "-s", addr.String(), "-j", "REJECT")
-	//cmd := exec.Command("echo", "Unfiltered IP " + addr.String())
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.WithError(err).Warn("Failed to run ip address remove filter")
