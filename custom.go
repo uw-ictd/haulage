@@ -88,9 +88,10 @@ func LogUserPeriodic(user gopacket.Endpoint, localUpBytes int64, localDownBytes 
 	verifyBalance(status)
 }
 
-func LogFlowPeriodic(start time.Time, stop time.Time, flow gopacket.Flow, bytesAB int, bytesBA int, wg *sync.WaitGroup) {
+func LogFlowPeriodic(
+	start time.Time, stop time.Time, flow classify.FiveTuple, bytesAB int, bytesBA int, wg *sync.WaitGroup) {
 	defer wg.Done()
-	storage.LogFlow(ctx.db, start, stop, flow, "", "", bytesAB, bytesBA)
+	storage.LogFlow(ctx.db, start, stop, flow, bytesAB, bytesBA)
 }
 
 func LogDNS(dnsEvent *classify.DnsMsg, wg *sync.WaitGroup) {

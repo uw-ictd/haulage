@@ -1,12 +1,15 @@
 package storage
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/binary"
 	"errors"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/gopacket"
 	"github.com/shopspring/decimal"
 	log "github.com/sirupsen/logrus"
+	"github.com/uw-ictd/haulage/internal/classify"
 	"net"
 	"time"
 )
@@ -146,11 +149,28 @@ func UpdateBridgedState(db *sql.DB, userIP net.IP, bridged bool) error {
 	return nil
 }
 
-func LogFlow(db *sql.DB, start time.Time, stop time.Time, flow gopacket.Flow, hostA string, hostB string, bytesAB int, bytesBA int) {
-	// TODO(matt9j) Lookup the correct hostname to host number mapping and insert if necessary.
+func LogFlow(db *sql.DB, start time.Time, stop time.Time, flow classify.FiveTuple, bytesAB int, bytesBA int) {
+	var transportSrcPort uint16
+	reader := bytes.NewReader(flow.Transport.Src().Raw())
+	if err := binary.Read(reader, binary.BigEndian, &transportSrcPort); err != nil {
+		transportSrcPort = 0
+		log.WithField("value", flow.Transport.Src().String()).WithError(err).Error(
+			"Failed to convert transport port number")
+	}
 
-	_, err := db.Exec("INSERT INTO flowlogs VALUE (?, ?, ?, ?, ?, ?, ?, ?)",
-		start, stop, flow.Src().Raw(), flow.Dst().Raw(), 0, 0, bytesAB, bytesBA)
+	var transportDstPort uint16
+	reader = bytes.NewReader(flow.Transport.Dst().Raw())
+	if err := binary.Read(reader, binary.BigEndian, &transportDstPort); err != nil {
+		transportDstPort = 0
+		log.WithField("value", flow.Transport.Dst().String()).WithError(err).Error(
+			"Failed to convert transport port number")
+	}
+
+
+	_, err := db.Exec("INSERT INTO flowlogs VALUE (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		start, stop, flow.Network.Src().Raw(), flow.Network.Dst().Raw(),
+		flow.TransportProtocol, transportSrcPort, transportDstPort,
+		bytesAB, bytesBA)
 	if err != nil {
 		// TODO(matt9j) Log the flow event itself once one is defined.
 		log.WithError(err).Error("Unable to commit a flow log!!!")
