@@ -37,27 +37,23 @@ type usageEvent struct {
 
 // Completely describes a transport level network flow.
 type fiveTuple struct {
-	sourceIP net.IP
-	destIP net.IP
-	sourcePort uint16
-	destPort uint16
-	protocol uint16
+	Network           gopacket.Flow
+	Transport         gopacket.Flow
+	TransportProtocol uint8
 }
 
 // True if the other fiveTuple flow is in the same bidirectional flow.
-func (original fiveTuple) sameBidirectionalFlow(other fiveTuple) bool {
+func (original fiveTuple) SameBidirectionalFlow(other fiveTuple) bool {
 	// Same direction case
-	if original.destIP.Equal(other.destIP) && original.sourceIP.Equal(other.sourceIP) {
-		return (original.protocol == other.protocol) &&
-			(original.sourcePort == other.sourcePort) &&
-			(original.destPort == other.destPort)
+	if original.Network == other.Network {
+		return (original.TransportProtocol == other.TransportProtocol) &&
+			(original.Transport == other.Transport)
 	}
 
 	// Reverse direction case
-	if original.destIP.Equal(other.sourceIP) && original.sourceIP.Equal(other.destIP) {
-		return (original.protocol == other.protocol) &&
-			(original.sourcePort == other.destPort) &&
-			(original.destPort == other.sourcePort)
+	if original.Network.Reverse() == other.Network {
+		return (original.TransportProtocol == other.TransportProtocol) &&
+			(original.Transport.Reverse() == other.Transport)
 	}
 
 	return false
@@ -67,35 +63,21 @@ func (original fiveTuple) sameBidirectionalFlow(other fiveTuple) bool {
 //
 // Two five tuples representing both directions of a flow will have the same canonical form.
 func (original fiveTuple) makeCanonical() fiveTuple {
-	// Handle loopback separately to order by port
-	if original.sourceIP.Equal(original.destIP) {
-		if original.sourcePort <= original.destPort {
+	// Handle loopback separately to order by the Transport endpoints
+	if original.Network.Src() == original.Network.Dst() {
+		if original.Transport.Src().LessThan(original.Transport.Dst()) {
 			return original
 		}
 
-		return fiveTuple{original.destIP,
-			original.sourceIP,
-			original.destPort,
-			original.sourcePort,
-			original.protocol}
+		return fiveTuple{original.Network.Reverse(), original.Transport.Reverse(), original.TransportProtocol}
 	}
 
-	// Otherwise order by IP
-	// Convert to strings since the net.IP type does not have a native ordering
-	sourceIPString := original.sourceIP.String()
-	destIPString := original.destIP.String()
-
-	if sourceIPString < destIPString {
+	// Otherwise order by the Network layer endpoints
+	if original.Network.Src().LessThan(original.Network.Dst()) {
 		return original
-	} else if sourceIPString > destIPString {
-		return fiveTuple{original.destIP,
-			original.sourceIP,
-			original.destPort,
-			original.sourcePort,
-			original.protocol}
-	} else {
-		panic("IP equality does not match string equality")
 	}
+
+	return fiveTuple{original.Network.Reverse(), original.Transport.Reverse(), original.TransportProtocol}
 }
 
 type flowEvent struct {
