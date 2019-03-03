@@ -35,7 +35,7 @@ type usageEvent struct {
 }
 
 type flowEvent struct {
-	flow   gopacket.Flow
+	flow   classify.FiveTuple
 	amount int
 }
 
@@ -55,7 +55,6 @@ var (
 	snapshotLen     int32 = 1024
 	promiscuous           = true
 	snapshotTimeout       = 5 * time.Second
-	err             error
 	handle          *pcap.Handle
 	flowHandlers    = new(sync.Map)
 	userAggregators = new(sync.Map)
@@ -75,26 +74,66 @@ func classifyPacket(packet gopacket.Packet, wg *sync.WaitGroup) {
 		return
 	}
 
+	if packet.TransportLayer() == nil {
+		log.WithField("Packet", packet).Debug(
+			"Packet has no transport layer and will not be counted")
+		return
+	}
+
 	// Check for errors
 	if err := packet.ErrorLayer(); err != nil {
 		log.Debug("Error decoding some part of the packet:", err)
 	}
 
-	sendToFlowHandler(flowEvent{packet.NetworkLayer().NetworkFlow(), len(packet.NetworkLayer().LayerPayload())}, wg)
+	// 255 is IANA reserved, and if logged will signal an unhandled network protocol.
+	var transportProtocol uint8 = 255
+	netLayer := packet.NetworkLayer()
+
+	if (netLayer.LayerType() != layers.LayerTypeIPv4) && (netLayer.LayerType() != layers.LayerTypeIPv6) {
+		log.WithField("LayerType", netLayer.LayerType()).Warning("Non-IP is not supported")
+	}
+
+	if netLayer.LayerType() == layers.LayerTypeIPv4 {
+		ipPacket, ok := netLayer.(*layers.IPv4)
+		if !ok {
+			log.Error("IPv4 Decoding Failed")
+			return
+		}
+
+		transportProtocol = uint8(ipPacket.Protocol)
+	}
+
+	if netLayer.LayerType() == layers.LayerTypeIPv6 {
+		ipPacket, ok := netLayer.(*layers.IPv6)
+		if !ok {
+			log.Error("IPv6 Decoding Failed")
+			return
+		}
+
+		transportProtocol = uint8(ipPacket.NextHeader)
+	}
+
+	flow := classify.FiveTuple{
+		Network:           packet.NetworkLayer().NetworkFlow(),
+		Transport:         packet.TransportLayer().TransportFlow(),
+		TransportProtocol: transportProtocol,
+	}
+
+	sendToFlowHandler(flowEvent{flow, len(packet.NetworkLayer().LayerPayload())}, wg)
 	var msg classify.DnsMsg
-	if err := classify.ParseDns(packet, &msg); err == nil {
+	if err := classify.ParseDns(packet, flow, &msg); err == nil {
 		// Errors are expected, since most packets are not valid DNS.
 		LogDNS(&msg, wg)
 	}
 }
 
 func sendToFlowHandler(event flowEvent, wg *sync.WaitGroup) {
-	if flowChannel, ok := flowHandlers.Load(event.flow.FastHash()); ok {
+	if flowChannel, ok := flowHandlers.Load(event.flow.MakeCanonical()); ok {
 		flowChannel.(chan flowEvent) <- event
 	} else {
 		// Attempt to allocate a new flow channel atomically. This can race between the check above and when the channel
 		// is created.
-		newChannel, existed := flowHandlers.LoadOrStore(event.flow.FastHash(), make(chan flowEvent))
+		newChannel, existed := flowHandlers.LoadOrStore(event.flow.MakeCanonical(), make(chan flowEvent))
 		if !existed {
 			wg.Add(1)
 			go flowHandler(newChannel.(chan flowEvent), event.flow, wg)
@@ -103,12 +142,13 @@ func sendToFlowHandler(event flowEvent, wg *sync.WaitGroup) {
 	}
 }
 
-func flowHandler(ch chan flowEvent, flow gopacket.Flow, wg *sync.WaitGroup) {
+func flowHandler(ch chan flowEvent, flow classify.FiveTuple, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer close(ch)
-	defer flowHandlers.Delete(flow.FastHash())
+	defer flowHandlers.Delete(flow.MakeCanonical())
 	// The flow logger will receive events from both A->B and B->A
-	endA := flow.Src()
+	endNetA := flow.Network.Src()
+	endTransportA := flow.Transport.Src()
 	bytesAB := 0
 	bytesBA := 0
 	intervalStart := time.Now()
@@ -118,12 +158,13 @@ func flowHandler(ch chan flowEvent, flow gopacket.Flow, wg *sync.WaitGroup) {
 	for {
 		select {
 		case event := <-ch:
-			if event.flow.Src() == endA {
+			if (event.flow.Network.Src() == endNetA) && (event.flow.Transport.Src() == endTransportA) {
 				bytesAB += event.amount
 			} else {
 				bytesBA += event.amount
 			}
-			generateUsageEvents(event.flow, event.amount, wg)
+			// Usage events are based on network layer address (IP) only for now.
+			generateUsageEvents(event.flow.Network, event.amount, wg)
 		case <-ticker.C:
 			if (bytesAB == 0) && (bytesBA == 0) {
 				// Reclaim handlers and channels from flows idle an entire period.
@@ -253,11 +294,18 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Debug("")
 	parseConfig(opts.ConfigPath)
 
-	params := Parameters{config.Custom.DBLocation, config.Custom.DBUser, config.Custom.DBPass, config.FlowLogInterval, config.UserLogInterval, config.Custom.ReenableUserPollInterval}
+	params := Parameters{
+		config.Custom.DBLocation,
+		config.Custom.DBUser,
+		config.Custom.DBPass,
+		config.FlowLogInterval,
+		config.UserLogInterval,
+		config.Custom.ReenableUserPollInterval,
+	}
 	log.WithField("Parameters", config).Info("Parsed parameters")
+
 	// Open device
 	handle, err = pcap.OpenLive(config.Interface, snapshotLen, promiscuous, snapshotTimeout)
 	// Open file
@@ -267,8 +315,10 @@ func main() {
 	}
 	defer handle.Close()
 
+	log.Info("Initializing context")
 	OnStart(&ctx, params)
 	defer Cleanup(&ctx)
+	log.Info("Context initialization complete")
 
 	var processingGroup sync.WaitGroup
 
@@ -290,6 +340,7 @@ func main() {
 		Name:       "tun",
 	}
 
+	log.Info("Beginning packet by packet operation")
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
 		// Do something with a packet here.

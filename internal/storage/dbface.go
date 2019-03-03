@@ -7,6 +7,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/shopspring/decimal"
 	log "github.com/sirupsen/logrus"
+	"github.com/uw-ictd/haulage/internal/classify"
 	"net"
 	"time"
 )
@@ -26,8 +27,7 @@ type UserStatus struct {
 
 type DnsEvent struct {
 	Timestamp  time.Time
-	SourceIP   net.IP
-	DestIP     net.IP
+	Flow       classify.FiveTuple
 	Query      string
 	OpCode     uint16
 	ResultCode uint16
@@ -146,11 +146,24 @@ func UpdateBridgedState(db *sql.DB, userIP net.IP, bridged bool) error {
 	return nil
 }
 
-func LogFlow(db *sql.DB, start time.Time, stop time.Time, flow gopacket.Flow, hostA string, hostB string, bytesAB int, bytesBA int) {
-	// TODO(matt9j) Lookup the correct hostname to host number mapping and insert if necessary.
+func LogFlow(db *sql.DB, start time.Time, stop time.Time, flow classify.FiveTuple, bytesAB int, bytesBA int) {
+	transportSrcPort, err := flow.TransportSrcPort()
+	if err != nil {
+		log.WithField("value", flow.Transport.Src().String()).WithError(err).Error(
+			"Failed to convert transport port number")
+	}
 
-	_, err := db.Exec("INSERT INTO flowlogs VALUE (?, ?, ?, ?, ?, ?, ?, ?)",
-		start, stop, flow.Src().Raw(), flow.Dst().Raw(), 0, 0, bytesAB, bytesBA)
+	transportDstPort, err := flow.TransportDstPort()
+	if err != nil {
+		log.WithField("value", flow.Transport.Dst().String()).WithError(err).Error(
+			"Failed to convert transport port number")
+	}
+
+	_, err = db.Exec("INSERT INTO flowlogs VALUE (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		start, stop, flow.Network.Src().Raw(), flow.Network.Dst().Raw(),
+		flow.TransportProtocol, transportSrcPort, transportDstPort,
+		bytesAB, bytesBA)
+
 	if err != nil {
 		// TODO(matt9j) Log the flow event itself once one is defined.
 		log.WithError(err).Error("Unable to commit a flow log!!!")
@@ -238,7 +251,7 @@ func LogDnsResponse(db *sql.DB, event DnsEvent) error {
 			return err
 		}
 
-		var answerIndex uint32
+		var answerIndex uint64
 		err = trx.QueryRow("select idx from answers where `host`=? AND `ip_addresses`=? AND `ttls`=?", event.Query, event.AnswerIPs, event.AnswerTTLs).Scan(&answerIndex)
 		if err != nil {
 			log.WithField("query", event.Query).WithError(err).Error("Unable to lookup dns answer key")
@@ -246,8 +259,20 @@ func LogDnsResponse(db *sql.DB, event DnsEvent) error {
 			return err
 		}
 
+		transportSrcPort, err := event.Flow.TransportSrcPort()
+		if err != nil {
+			log.WithField("value", event.Flow.Transport.Src().String()).WithError(err).Error(
+				"Failed to convert transport port number")
+		}
+
+		transportDstPort, err := event.Flow.TransportDstPort()
+		if err != nil {
+			log.WithField("value", event.Flow.Transport.Dst().String()).WithError(err).Error(
+				"Failed to convert transport port number")
+		}
+
 		_, err = trx.Exec(
-			"INSERT INTO dnsResponses(`time`, `src_ip`, `dest_ip`, `opcode`, `resultcode`, `answer`)  VALUES (?, ?, ?, ?, ?, ?)", event.Timestamp, event.SourceIP, event.DestIP, event.OpCode, event.ResultCode, answerIndex)
+			"INSERT INTO dnsResponses(`time`, `srcIp`, `dstIp`, `transportProtocol`, `srcPort`, `dstPort`, `opcode`, `resultcode`, `answer`)  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", event.Timestamp, event.Flow.Network.Src().Raw(), event.Flow.Network.Dst().Raw(), event.Flow.TransportProtocol, transportSrcPort, transportDstPort, event.OpCode, event.ResultCode, answerIndex)
 		if err != nil {
 			log.WithField("query", event.Query).WithError(err).Error("Unable to log dns event.")
 			trx.Rollback()
