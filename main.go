@@ -35,50 +35,6 @@ type usageEvent struct {
 	amount      int
 }
 
-// Completely describes a transport level network flow.
-type fiveTuple struct {
-	Network           gopacket.Flow
-	Transport         gopacket.Flow
-	TransportProtocol uint8
-}
-
-// True if the other fiveTuple flow is in the same bidirectional flow.
-func (original fiveTuple) SameBidirectionalFlow(other fiveTuple) bool {
-	// Same direction case
-	if original.Network == other.Network {
-		return (original.TransportProtocol == other.TransportProtocol) &&
-			(original.Transport == other.Transport)
-	}
-
-	// Reverse direction case
-	if original.Network.Reverse() == other.Network {
-		return (original.TransportProtocol == other.TransportProtocol) &&
-			(original.Transport.Reverse() == other.Transport)
-	}
-
-	return false
-}
-
-// Represent the flow in an ordered form, possibly flipping the source and destination.
-//
-// Two five tuples representing both directions of a flow will have the same canonical form.
-func (original fiveTuple) makeCanonical() fiveTuple {
-	// Handle loopback separately to order by the Transport endpoints
-	if original.Network.Src() == original.Network.Dst() {
-		if original.Transport.Src().LessThan(original.Transport.Dst()) {
-			return original
-		}
-
-		return fiveTuple{original.Network.Reverse(), original.Transport.Reverse(), original.TransportProtocol}
-	}
-
-	// Otherwise order by the Network layer endpoints
-	if original.Network.Src().LessThan(original.Network.Dst()) {
-		return original
-	}
-
-	return fiveTuple{original.Network.Reverse(), original.Transport.Reverse(), original.TransportProtocol}
-}
 
 type flowEvent struct {
 	flow   gopacket.Flow
