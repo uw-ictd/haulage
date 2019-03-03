@@ -26,6 +26,9 @@ CREATE TABLE `flowlogs` (
   `intervalStop` timestamp NOT NULL,
   `addressA` varbinary(16) NOT NULL,
   `addressB` varbinary(16) NOT NULL,
+  `transportProtocol` tinyint UNSIGNED NOT NULL,
+  `portA` smallint UNSIGNED NOT NULL,
+  `portB` smallint UNSIGNED NOT NULL,
   `bytesAtoB` bigint NOT NULL,
   `bytesBtoA` bigint NOT NULL
 ) ENGINE=InnoDB;
