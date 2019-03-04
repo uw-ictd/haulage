@@ -31,7 +31,8 @@ package: build
 		--maintainer matt9j@cs.washington.edu \
 		--description $(DESCRIPTION) \
 		--url "https://github.com/uw-ictd/haulage" \
-		--deb-compression xz \
+		--deb-build-depends libpcap-dev \
+		--deb-compression gz \
 		--deb-systemd ./init/haulage.service \
 		--deb-systemd-restart-after-upgrade \
 		--name haulage \
