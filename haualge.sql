@@ -3,9 +3,9 @@ DROP TABLE IF EXISTS `answers`;
 DROP TABLE IF EXISTS `flowlogs`;
 
 CREATE TABLE `answers` (
-  `host` varchar(255) CHARACTER SET utf8mb4 NOT NULL,
-  `ip_addresses` varchar(512) CHARACTER SET ascii NOT NULL,
-  `ttls` varchar(255) CHARACTER SET ascii NOT NULL,
+  `host` varchar(255) CHARACTER SET ascii NOT NULL,
+  `ip_addresses` varchar(416) CHARACTER SET ascii NOT NULL,
+  `ttls` varchar(96) CHARACTER SET ascii NOT NULL,
   idx bigint UNSIGNED AUTO_INCREMENT,
   UNIQUE KEY (host, ip_addresses, ttls),
   PRIMARY KEY (idx)
