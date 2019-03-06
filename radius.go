@@ -1,18 +1,17 @@
 package main
 
 import (
+	"database/sql"
 	"layeh.com/radius"
 	"layeh.com/radius/rfc2865"
 	"net"
-	"database/sql"
 
 	_ "github.com/go-sql-driver/mysql"
 	log "github.com/sirupsen/logrus"
-
 )
 
 func start_radius_server(db *sql.DB) {
-	// handler for responding client's reqeust for IP 
+	// handler for responding client's reqeust for IP
 	handler := func(w radius.ResponseWriter, r *radius.Request) {
 		log.Info("We have one Request")
 		// grab imsi from username field
@@ -24,17 +23,17 @@ func start_radius_server(db *sql.DB) {
 		rows, err := db.Query("SELECT ip FROM static_ips WHERE imsi = ?", imsi)
 		defer rows.Close()
 		var res *radius.Packet = radius.New(radius.CodeAccessAccept, r.Secret)
-	    res.Authenticator = r.Authenticator
+		res.Authenticator = r.Authenticator
 		// internal error
 		if err != nil {
 			log.WithError(err).Error("We cannot query through our databse")
-		    res.Code = radius.CodeAccessReject?
-		} 
+			res.Code = radius.CodeAccessReject
+		}
 		var ip string
 		if rows.Next() {
 			if err1 := rows.Scan(&ip); err1 != nil {
 				log.Fatal("sql.rows.Scan() does not work")
-		    	res.Code = radius.CodeAccessReject 
+				res.Code = radius.CodeAccessReject
 			} else {
 				// found the ip
 				res.Code = radius.CodeAccessAccept
@@ -44,9 +43,9 @@ func start_radius_server(db *sql.DB) {
 				// add the ip to FramedIPAddress attribute of the packet
 				err2 := rfc2865.FramedIPAddress_Add(res, IP_found)
 				// internal error
-				if (err2 != nil) {
+				if err2 != nil {
 					log.Fatal("Cannot add the ip to the packet")
-		    		res.Code = radius.CodeAccessReject
+					res.Code = radius.CodeAccessReject
 				}
 			}
 		} else {
@@ -55,12 +54,12 @@ func start_radius_server(db *sql.DB) {
 			res.Code = radius.CodeAccessReject
 		}
 		// write back to client
-	    err = w.Write(res)	
+		err = w.Write(res)
 		if err != nil {
 			log.Fatal("Cannot write back the message")
 			return
 		}
-	}	
+	}
 
 	server := radius.PacketServer{
 		Handler:      radius.HandlerFunc(handler),
