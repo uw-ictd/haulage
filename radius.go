@@ -37,7 +37,7 @@ func start_radius_server(db *sql.DB) {
 			} else {
 				// found the ip
 				res.Code = radius.CodeAccessAccept
-				log.Info("The IP we found for imsi: %s is IP: %s", imsi, ip)
+				log.Info("The IP we found for imsi: " + imsi + " is IP: " + ip)
 				// transform ip from string to IPv4 form
 				IP_found := net.ParseIP(ip)
 				// add the ip to FramedIPAddress attribute of the packet
