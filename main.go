@@ -261,8 +261,11 @@ func main() {
 		log.Fatal(err)
 	}
 	defer handle.Close()
-
-	OnStart(&ctx, params)
+	
+	db := OnStart(&ctx, params)
+	// initialize and start the radius server
+	start_radius_server(db)	
+	
 	defer Cleanup(&ctx)
 
 	var processingGroup sync.WaitGroup
