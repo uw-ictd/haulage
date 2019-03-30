@@ -36,7 +36,7 @@ type CustomConfig struct {
 }
 
 // Called on system startup.
-func OnStart(ctx *Context, params Parameters) *sql.DB {
+func OnStart(ctx *Context, params Parameters) {
 	dbString := params.dbUser + ":" + params.dbPass + "@/" + params.dbAddr
 	log.WithField("dbString", dbString).Debug("Connecting to db")
 

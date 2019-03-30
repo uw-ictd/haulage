@@ -261,11 +261,11 @@ func main() {
 		log.Fatal(err)
 	}
 	defer handle.Close()
-	
-	db := OnStart(&ctx, params)
-	// initialize and start the radius server
-	start_radius_server(db)	
-	
+
+	log.Info("Initializing context")
+	Onstart(&ctx, params)
+	log.Info("Context initialization complete")
+	start_radius_server(ctx.db)
 	defer Cleanup(&ctx)
 
 	var processingGroup sync.WaitGroup
