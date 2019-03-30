@@ -60,7 +60,6 @@ func OnStart(ctx *Context, params Parameters) {
 	ctx.terminateSig = make(chan struct{})
 	pollInterval := params.pollInterval
 	go pollForReenabledUsers(ctx.terminateSig, ctx.db, ctx.pollers, pollInterval)
-	return db
 }
 
 // Cleanup can be called at any time, even on a crash.
