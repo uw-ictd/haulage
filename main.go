@@ -168,7 +168,7 @@ func flowHandler(ch chan flowEvent, flow classify.FiveTuple, wg *sync.WaitGroup)
 		case <-ticker.C:
 			if (bytesAB == 0) && (bytesBA == 0) {
 				// Reclaim handlers and channels from flows idle an entire period.
-				log.WithField("Flow", flow).Info("Reclaiming")
+				log.WithField("Flow", flow).Debug("Reclaiming")
 				return
 			}
 
