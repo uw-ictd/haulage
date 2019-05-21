@@ -7,6 +7,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/shopspring/decimal"
 	log "github.com/sirupsen/logrus"
+	"github.com/uw-ictd/haulage/internal/classify"
 	"net"
 	"time"
 )
