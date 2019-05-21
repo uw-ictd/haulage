@@ -23,7 +23,6 @@ var (
 	userAggregators = new(sync.Map)
 )
 
-
 var opts struct {
 	ConfigPath string `short:"c" long:"config" description:"The path to the configuration file" required:"true" default:"/etc/haulage/config.yml"`
 }
@@ -50,16 +49,16 @@ func parseConfig(path string) {
 
 func main() {
 	log.Info("Starting PCRF")
-	
+
 	// Setup flags
 	_, err := flags.Parse(&opts)
 	if err != nil {
 		log.Fatal(err)
 	}
-	
+
 	parseConfig(opts.ConfigPath)
 
-    params := Parameters{config.Custom.DBLocation, config.Custom.DBUser, config.Custom.DBPass, config.FlowLogInterval, config.UserLogInterval, config.Custom.ReenableUserPollInterval}
+	params := Parameters{config.Custom.DBLocation, config.Custom.DBUser, config.Custom.DBPass, config.FlowLogInterval, config.UserLogInterval, config.Custom.ReenableUserPollInterval}
 	log.WithField("Parameters", config).Info("Parsed parameters")
 
 	log.Info("Initializing context")
@@ -68,7 +67,7 @@ func main() {
 	defer Cleanup(&ctx)
 	log.Info("Context initialization complete")
 
-	start_radius_server(ctx.db);
+	start_radius_server(ctx.db)
 
 	var processingGroup sync.WaitGroup
 

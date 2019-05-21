@@ -9,9 +9,9 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/gopacket"
 	log "github.com/sirupsen/logrus"
+	"github.com/uw-ictd/haulage/internal/classify"
 	"github.com/uw-ictd/haulage/internal/iptables"
 	"github.com/uw-ictd/haulage/internal/storage"
-	"github.com/uw-ictd/haulage/internal/classify"
 )
 
 type Context struct {
