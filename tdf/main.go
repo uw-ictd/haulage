@@ -2,12 +2,12 @@ package main
 
 import (
 	"io/ioutil"
-	"sync"
 	"os"
 	"os/signal"
+	"sync"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/jessevdk/go-flags"
+	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 )
 
@@ -61,7 +61,7 @@ func main() {
 	}
 	defer trafficDetector.Close()
 
-	trafficDetector.StartDetection();
+	trafficDetector.StartDetection()
 	//StartPCRF();
 
 	processingGroup.Wait()

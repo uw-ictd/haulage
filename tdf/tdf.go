@@ -6,14 +6,14 @@ import (
 	"sync"
 	"time"
 
-	"layeh.com/radius"
-	"layeh.com/radius/rfc2865"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	log "github.com/sirupsen/logrus"
 	"github.com/uw-ictd/haulage/tdf/internal/classify"
 	"github.com/uw-ictd/haulage/tdf/internal/types"
+	"layeh.com/radius"
+	"layeh.com/radius/rfc2865"
 )
 
 type FlowType int
@@ -53,9 +53,9 @@ type TrafficDetector struct {
 }
 
 type Config struct {
-	FlowLogInterval time.Duration      `yaml:"flowLogInterval"`
-	UserLogInterval time.Duration      `yaml:"userLogInterval"`
-	Interface       string             `yaml:"interface"`
+	FlowLogInterval time.Duration `yaml:"flowLogInterval"`
+	UserLogInterval time.Duration `yaml:"userLogInterval"`
+	Interface       string        `yaml:"interface"`
 }
 
 /** Creates a Traffic Detector based around the given config */
@@ -94,7 +94,7 @@ func (tdf *TrafficDetector) StartDetection() {
 	}
 }
 
-// Parse the network layer of the packet and push it to the appropriate channel 
+// Parse the network layer of the packet and push it to the appropriate channel
 // for each flow.
 func (tdf *TrafficDetector) classifyPacket(packet gopacket.Packet) {
 	// Only support ethernet link layers.
