@@ -74,7 +74,7 @@ func OnStop(ctx *Context) {
 }
 
 // The callback functions are executed periodically by the main subsystem.
-func LogUserPeriodic(user gopacket.Endpoint, localUpBytes int64, localDownBytes int64, extUpBytes int64, extDownBytes int64) {
+func LogUserPeriodic(user string, localUpBytes int64, localDownBytes int64, extUpBytes int64, extDownBytes int64) {
 	// TODO(matt9j) Consider logging local traffic just for analysis purposes.
 	// TODO(matt9j) Add this to the wait group and run db operations async.
 	status, err := storage.LogUsage(ctx.db,

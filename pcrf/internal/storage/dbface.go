@@ -24,7 +24,7 @@ type UserStatus struct {
 }
 
 func LogUsage(db *sql.DB, event UseEvent) (UserStatus, error) {
-	ip := net.ParseIP(event.UserAddress.String())
+	ip := net.ParseIP(event.UserAddress)
 	if ip == nil {
 		log.WithField("Endpoint", event.UserAddress).Error("Unable to parse user IP")
 	}
