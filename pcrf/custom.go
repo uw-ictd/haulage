@@ -9,9 +9,8 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/gopacket"
 	log "github.com/sirupsen/logrus"
-	"github.com/uw-ictd/haulage/internal/classify"
-	"github.com/uw-ictd/haulage/internal/iptables"
-	"github.com/uw-ictd/haulage/internal/storage"
+	"github.com/uw-ictd/haulage/pcrf/internal/iptables"
+	"github.com/uw-ictd/haulage/pcrf/internal/storage"
 )
 
 type Context struct {
@@ -85,11 +84,6 @@ func LogUserPeriodic(user gopacket.Endpoint, localUpBytes int64, localDownBytes 
 	}
 
 	verifyBalance(status)
-}
-
-func LogFlowPeriodic(start time.Time, stop time.Time, flow classify.FiveTuple, bytesAB int, bytesBA int, wg *sync.WaitGroup) {
-	defer wg.Done()
-	storage.LogFlow(ctx.db, start, stop, flow, bytesAB, bytesBA)
 }
 
 func verifyBalance(user storage.UserStatus) {

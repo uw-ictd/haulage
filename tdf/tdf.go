@@ -1,4 +1,4 @@
-package tdf
+package main
 
 import (
 	"context"
