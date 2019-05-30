@@ -95,7 +95,7 @@ func verifyBalance(user storage.UserStatus) {
 		return
 	case (user.CurrentDataBalance <= 0) && (user.PriorDataBalance > 0):
 		log.WithField("User", user.UserAddress).Info("No balance remaining")
-		addr := net.ParseIP(user.UserAddress.String())
+		addr := net.ParseIP(user.UserAddress)
 		if addr == nil {
 			log.WithField("Endpoint", user.UserAddress).Error("Unable to parse an IP from endpoint")
 		}
@@ -153,7 +153,7 @@ type UserContext struct {
 func (context *UserContext) Init(user gopacket.Endpoint) {
 	// TODO(gh/8) Abuse the store api and store an update of 0 to get the status.
 	status, err := storage.LogUsage(ctx.db,
-		storage.UseEvent{UserAddress: user, BytesUp: 0, BytesDown: 0})
+		storage.UseEvent{UserAddress: user.String(), BytesUp: 0, BytesDown: 0})
 	if err != nil {
 		log.WithField("user", user).Warn("Failed to init user")
 	}

@@ -4,20 +4,19 @@ import (
 	"database/sql"
 	"errors"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/google/gopacket"
 	"github.com/shopspring/decimal"
 	log "github.com/sirupsen/logrus"
 	"net"
 )
 
 type UseEvent struct {
-	UserAddress gopacket.Endpoint
+	UserAddress string
 	BytesUp     int64
 	BytesDown   int64
 }
 
 type UserStatus struct {
-	UserAddress        gopacket.Endpoint
+	UserAddress        string
 	CurrentDataBalance int64
 	PriorDataBalance   int64
 	CurrencyBalance    decimal.Decimal
