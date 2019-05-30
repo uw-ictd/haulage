@@ -67,7 +67,7 @@ func main() {
 	defer Cleanup(&ctx)
 	log.Info("Context initialization complete")
 
-	start_radius_server(ctx.db)
+	start_radius_server()
 
 	var processingGroup sync.WaitGroup
 
