@@ -21,6 +21,13 @@ func start_radius_server() {
 		extUpBytes := binary.LittleEndian.Uint64(dataBytes[16:24])
 		extDownBytes := binary.LittleEndian.Uint64(dataBytes[24:32])	
 
+		log.Info("We receives" + user)
+		var res *radius.Packet = radius.New(radius.CodeAccessAccept, r.Secret)
+		res.Authenticator = r.Authenticator
+		err := w.Write(res)
+		if err != nil {
+			log.Fatal("Cannot write back Accept to the sender")
+		}
 		LogUserPeriodic(user, int64(localUpBytes), int64(localDownBytes), int64(extUpBytes),  int64(extDownBytes))
 			
 	}
