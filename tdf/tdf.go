@@ -66,9 +66,9 @@ func CreateTDF(config Config, waitGroup sync.WaitGroup) (TrafficDetector, error)
 	tdf.flowHandlers = make(map[classify.FiveTuple]chan FlowEvent)
 	tdf.userAggregators = make(map[gopacket.Endpoint]chan UsageEvent)
 	// Open device
-	handle, err := pcap.OpenLive(config.Interface, SNAPSHOT_LEN, PROMISCUOUS, SNAPSHOT_TIMEOUT)
+	// handle, err := pcap.OpenLive(config.Interface, SNAPSHOT_LEN, PROMISCUOUS, SNAPSHOT_TIMEOUT)
 	// Open file
-	// handle, err = pcap.OpenOffline("testdata/small.pcap")
+	handle, err := pcap.OpenOffline("testdata/large.pcap")
 	if err != nil {
 		log.Fatal(err)
 	} else {
@@ -199,6 +199,7 @@ func (tdf *TrafficDetector) flowHandler(ch chan FlowEvent, flow classify.FiveTup
 				bytesBA += event.amount
 			}
 			// Usage events are based on network layer address (IP) only for now.
+			
 			tdf.generateUsageEvents(event.flow.Network, event.amount)
 
 		case <-ticker.C:
@@ -284,7 +285,7 @@ func (tdf *TrafficDetector) aggregateUser(ch chan UsageEvent, user gopacket.Endp
 			}
 
 			// TODO(gh/8) Reduce duplication below with user context cleanup.
-			if customContext.ShouldLogNow(extUpBytes + extDownBytes) {
+		   if customContext.ShouldLogNow(extUpBytes + extDownBytes) {				
 				log.WithField("User", user).Debug(localUpBytes, localDownBytes, extUpBytes, extDownBytes)
 				tdf.sendUsage(user, localUpBytes, localDownBytes, extUpBytes, extDownBytes)
 				localUpBytes = 0
@@ -293,6 +294,7 @@ func (tdf *TrafficDetector) aggregateUser(ch chan UsageEvent, user gopacket.Endp
 				extDownBytes = 0
 			}
 		case <-logTick.C:
+
 			if (localUpBytes == 0) && (localDownBytes == 0) && (extUpBytes == 0) && (extDownBytes == 0) {
 				// Reclaim handlers and channels from users that have finished.
 				log.WithField("User", user).Info("Reclaiming")
@@ -317,7 +319,7 @@ func (tdf *TrafficDetector) sendUsage(user gopacket.Endpoint, localUpBytes int64
 	binary.LittleEndian.PutUint64(dataBytes[16:24], uint64(extUpBytes))
 	binary.LittleEndian.PutUint64(dataBytes[24:32], uint64(extDownBytes))
 	rfc2865.State_Set(packet, dataBytes)
-	_, err := radius.Exchange(context.Background(), packet, "localhost:1813")
+	_, err := radius.Exchange(context.Background(), packet, "localhost:1812")
 	if err != nil {
 		log.Fatal(err)
 	}
