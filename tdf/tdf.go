@@ -199,7 +199,7 @@ func (tdf *TrafficDetector) flowHandler(ch chan FlowEvent, flow classify.FiveTup
 				bytesBA += event.amount
 			}
 			// Usage events are based on network layer address (IP) only for now.
-			
+
 			tdf.generateUsageEvents(event.flow.Network, event.amount)
 
 		case <-ticker.C:
@@ -285,7 +285,7 @@ func (tdf *TrafficDetector) aggregateUser(ch chan UsageEvent, user gopacket.Endp
 			}
 
 			// TODO(gh/8) Reduce duplication below with user context cleanup.
-		   if customContext.ShouldLogNow(extUpBytes + extDownBytes) {				
+			if customContext.ShouldLogNow(extUpBytes + extDownBytes) {
 				log.WithField("User", user).Debug(localUpBytes, localDownBytes, extUpBytes, extDownBytes)
 				tdf.sendUsage(user, localUpBytes, localDownBytes, extUpBytes, extDownBytes)
 				localUpBytes = 0
