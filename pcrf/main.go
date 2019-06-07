@@ -24,7 +24,7 @@ var (
 )
 
 var opts struct {
-	ConfigPath string `short:"c" long:"config" description:"The path to the configuration file" required:"true" default:"/etc/haulage/config.yml"`
+	ConfigPath string `short:"c" long:"config" description:"The path to the configuration file" required:"true" default:"config.yml"`
 }
 
 var config struct {
