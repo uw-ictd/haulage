@@ -12,7 +12,8 @@ import (
 	"github.com/google/gopacket/pcap"
 	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
-	"github.com/uw-ictd/haulage/internal/classify"
+	//"github.com/uw-ictd/haulage/internal/classify"
+	"haulage/internal/classify"
 	"gopkg.in/yaml.v2"
 )
 
@@ -287,6 +288,7 @@ func parseConfig(path string) {
 
 func main() {
 	log.Info("Starting haulage")
+	log.Info("Testing build")
 
 	// Setup flags
 	_, err := flags.Parse(&opts)
@@ -307,9 +309,9 @@ func main() {
 	log.WithField("Parameters", config).Info("Parsed parameters")
 
 	// Open device
-	handle, err = pcap.OpenLive(config.Interface, snapshotLen, promiscuous, snapshotTimeout)
+	//handle, err = pcap.OpenLive(config.Interface, snapshotLen, promiscuous, snapshotTimeout)
 	// Open file
-	// handle, err = pcap.OpenOffline("testdata/small.pcap")
+	handle, err = pcap.OpenOffline("testdata/large.pcap")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -318,7 +320,8 @@ func main() {
 	log.Info("Initializing context")
 	OnStart(&ctx, params)
 	log.Info("Context initialization complete")
-	start_radius_server(ctx.db)
+	//start_radius_server(ctx.db)
+	log.Info("Does this run after radius server")
 	defer Cleanup(&ctx)
 	log.Info("Context initialization complete")
 
@@ -335,6 +338,7 @@ func main() {
 		log.Fatal("Terminating Uncleanly! Connections may be orphaned.")
 	}()
 
+	log.Info("Does this run after signal notify")
 	// Skip directly to decoding IPv4 on the tunneled packets.
 	// TODO(matt9j) Make this smarter to use ip4 or ip6 based on the tunnel address and type?
 	layers.LinkTypeMetadata[12] = layers.EnumMetadata{

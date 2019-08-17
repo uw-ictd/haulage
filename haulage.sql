@@ -1,6 +1,7 @@
 DROP TABLE IF EXISTS `dnsResponses`;
 DROP TABLE IF EXISTS `answers`;
 DROP TABLE IF EXISTS `flowlogs`;
+DROP TABLE IF EXISTS `servicelogs`;
 
 CREATE TABLE `answers` (
   `host` varchar(255) CHARACTER SET ascii NOT NULL,
@@ -34,4 +35,13 @@ CREATE TABLE `flowlogs` (
   `portB` smallint UNSIGNED NOT NULL,
   `bytesAtoB` bigint NOT NULL,
   `bytesBtoA` bigint NOT NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE `servicelogs` (
+  `service` varchar(255) CHARACTER SET ascii NOT NULL,
+  `totalbytes` bigint NOT NULL,
+  `numusers` smallint UNSIGNED NOT NULL,
+  idx bigint UNSIGNED AUTO_INCREMENT,
+  UNIQUE KEY (service),
+  PRIMARY KEY (idx)
 ) ENGINE=InnoDB;
