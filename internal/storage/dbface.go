@@ -11,6 +11,8 @@ import (
 	"haulage/internal/classify"
 	"net"
 	"time"
+	"fmt"
+	"strings"
 )
 
 type UseEvent struct {
@@ -171,6 +173,19 @@ func LogFlow(db *sql.DB, start time.Time, stop time.Time, flow classify.FiveTupl
 	}
 }
 
+// Esther:
+// Function to increment the totalbytes value for each identified service of interest and also the total, in the servicelogs table.
+func LogServiceDB(db *sql.DB, service string, amount int) {
+	_, err := db.Exec("UPDATE servicelogs SET totalbytes = totalbytes + ? WHERE servicelogs.service = ?", amount, service)
+	if err != nil {
+		log.WithError(err).Error("ERROR: Unable to commit a service log!")
+	}
+	_, err = db.Exec("UPDATE servicelogs SET totalbytes = totalbytes + ? WHERE servicelogs.service = 'total'", amount)
+	if err != nil {
+		log.WithError(err).Error("ERROR: Unable to commit a service log incrementing total!")
+	}
+}
+
 type UserBridgedState struct {
 	Addr    net.IP
 	Bridged bool
@@ -234,6 +249,77 @@ func QueryToppedUpCustomers(db *sql.DB) []net.IP {
 	}
 
 	return toppedUpUsers
+}
+
+// Esther:
+// Function querying the IP addresses associated with a given service.
+// Query answers table over hosts for string matching, and get back all IPs associated with a given service.
+// Then for each service, compare my target IP address with those IP addresses.
+// Return the first service that matches since there's only one.
+func QueryServiceIPs(db *sql.DB, targetIP net.IP) string {
+	// get all string-match aliases for each service from servicelogs db, one row per service
+	servicerows, err := db.Query("SELECT service, aliases FROM servicelogs WHERE servicelogs.service != 'total'")
+	if err != nil {
+		log.WithError(err).Error("Unable to query service aliases from servicelogs")
+	}
+	defer servicerows.Close()
+
+	var aliasString string
+	var curService string
+	var serviceName string
+
+	// iterate over services doing string matches on dns answers db for all aliases
+	for servicerows.Next() {
+		if err := servicerows.Scan(&curService, &aliasString); err != nil {
+			log.WithError(err).Error("Unable to scan service alias from servicelogs")
+		}
+		// fmt.Printf("Checking service %s\n", curService)
+		aliases := strings.Split(aliasString, ",")
+		// for each alias, do a string match query
+		for _, a := range aliases {
+			rows, err := db.Query("SELECT ip_addresses FROM answers WHERE LOCATE(?, answers.host)>0", a)
+			if err != nil {
+				log.WithError(err).Error("Unable to query dns answers for matching IP addresses")
+			}
+			defer rows.Close()
+
+			var ipString string
+
+			// fmt.Printf("Checking service alias %s\n", a)
+
+			// iterate over each row, a list of dns-answered IP addresses
+			for rows.Next() {
+				if err := rows.Scan(&ipString); err != nil {
+					log.WithError(err).Error("Unable to scan DNS answer IPs from database")
+				}
+				if ipString != "" {
+					ips := strings.Split(strings.Trim(ipString,", "), ",")
+					for _, ip := range ips {
+						addr := net.ParseIP(ip)
+						// fmt.Printf("IP %s %T\n", ip, addr)
+						if addr == nil {
+							log.WithField("String", ipString).Error("Unable to parse DNS IP string to IP")
+							//fmt.Printf("ADDR %s %T\n", ip, addr)
+						}
+						if addr.Equal(targetIP) {
+							serviceName = curService
+							fmt.Printf("Identified Service! %s \n", curService)
+							break
+						}
+					}
+				} else {
+					log.WithField("String", a).Error("No ip address available for service")
+				}
+			}
+			if err = rows.Err(); err != nil {
+				log.WithError(err).Error("Error encountered when reading dns answer IPs")
+			}
+		}
+	}
+	if err = servicerows.Err(); err != nil {
+		log.WithError(err).Error("Error encountered when reading service aliases")
+	}
+	return serviceName
 }
 
 func LogDnsResponse(db *sql.DB, event DnsEvent) error {

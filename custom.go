@@ -129,6 +129,39 @@ func LogDNS(dnsEvent *classify.DnsMsg, wg *sync.WaitGroup) {
 	}
 }
 
+// Esther:
+// Function that calls the storage function that updates the database. 
+// Doing it like this because all of the database accesses (calling storage.Func) seem to come from here, and I wanted to follow your conventions.
+// Feel free to refactor!
+func LogServiceUsage(service string, amount int) {
+	log.Info("Running db access for servicelogs from custom.go")
+	storage.LogServiceDB(ctx.db, service, amount)
+}
+
+// Esther:
+// Function that calls the storage function to determine if IPs come from one of our services of interest.
+// It's in storage, not classify, because it requires database accesses.
+func FindService(endpoint gopacket.Endpoint) string {
+        ip := net.ParseIP(endpoint.String())
+        if ip == nil {
+                log.WithField("Endpoint", endpoint).Error("Endpoint is not IP parseable")
+                return ""
+        }
+
+        // Exclude specific IPs assigned to our network hardware in the user subnet.
+        if ip.Equal(net.ParseIP("192.168.151.1")) {
+                return ""
+        }
+
+        _, userBlock, _ := net.ParseCIDR("192.168.151.0/24")
+
+        if userBlock.Contains(ip) {
+                return ""
+        }
+	service := storage.QueryServiceIPs(ctx.db, ip)
+        return service
+}
+
 func verifyBalance(user storage.UserStatus) {
 	// Send a single alert when crossing a threshold. Go in reverse order so that if the user crosses multiple
 	// thresholds at once only the lowest alert is sent.

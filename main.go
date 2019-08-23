@@ -164,6 +164,18 @@ func flowHandler(ch chan flowEvent, flow classify.FiveTuple, wg *sync.WaitGroup)
 			} else {
 				bytesBA += event.amount
 			}
+			// Esther:
+			// Add event amount to servicelogs table if it belongs to a service of interest. 
+			// Assuming only one of the src or dst can be a service.
+			srcService := FindService(event.flow.Network.Src())
+			dstService := FindService(event.flow.Network.Dst())
+			if srcService != "" {
+				LogServiceUsage(srcService, event.amount)
+			}
+			if dstService != "" {
+				LogServiceUsage(dstService, event.amount)
+			}
+			// Esther: end of inserted code
 			// Usage events are based on network layer address (IP) only for now.
 			generateUsageEvents(event.flow.Network, event.amount, wg)
 		case <-ticker.C:
@@ -288,7 +300,6 @@ func parseConfig(path string) {
 
 func main() {
 	log.Info("Starting haulage")
-	log.Info("Testing build")
 
 	// Setup flags
 	_, err := flags.Parse(&opts)
@@ -311,7 +322,8 @@ func main() {
 	// Open device
 	//handle, err = pcap.OpenLive(config.Interface, snapshotLen, promiscuous, snapshotTimeout)
 	// Open file
-	handle, err = pcap.OpenOffline("testdata/large.pcap")
+	log.Info("Loading from test data only")
+	handle, err = pcap.OpenOffline("testdata/small.pcap")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -320,10 +332,11 @@ func main() {
 	log.Info("Initializing context")
 	OnStart(&ctx, params)
 	log.Info("Context initialization complete")
+	// Esther: commented out starting the radius server.
 	//start_radius_server(ctx.db)
-	log.Info("Does this run after radius server")
+	log.Info("Skipped radius server start")
 	defer Cleanup(&ctx)
-	log.Info("Context initialization complete")
+	//log.Info("Context initialization complete")
 
 	var processingGroup sync.WaitGroup
 
@@ -338,7 +351,6 @@ func main() {
 		log.Fatal("Terminating Uncleanly! Connections may be orphaned.")
 	}()
 
-	log.Info("Does this run after signal notify")
 	// Skip directly to decoding IPv4 on the tunneled packets.
 	// TODO(matt9j) Make this smarter to use ip4 or ip6 based on the tunnel address and type?
 	layers.LinkTypeMetadata[12] = layers.EnumMetadata{
