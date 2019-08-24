@@ -2,7 +2,7 @@
 
 import MySQLdb
 import csv
-import time
+import os.path
 
 
 HOSTNAME = "localhost"
@@ -10,40 +10,10 @@ USERNAME = "colte_db"
 PASSWORD = "colte_db"
 DBNAME = "colte_db"
 
-SERVICES = ['whatsapp', 'facebook', 'youtube']
-
-TP_OUTFILE = 'tp_data.tsv'
-USERS_OUTFILE = 'users_data.tsv'
+TP_OUTFILE = 'throughput_data.tsv'
 
 
-def servicelogs_init(services):
-    try:
-        connection = MySQLdb.connect(HOSTNAME, USERNAME, PASSWORD, DBNAME)
-    except:
-        print("Error: can't connect to db to init services")
-        return 0
-
-    cursor = connection.cursor()
-    for s in services:
-        try:
-            cursor.execute("INSERT INTO servicelogs(service, totalbytes, numusers) VALUES (%s, 0, 0)", (s,))
-        except:
-            print("Error: db INSERT failed on %s".format(s))
-
-    # DEBUG
-    cursor.execute("SELECT * FROM servicelogs")
-    for row in cursor.fetchall():
-        print row
-
-    # close connection
-    cursor.close()
-    connection.commit()
-    connection.close()
-
-
-def servicelogs_get(services):
-    new_nums = []
-
+def servicelogs_get(fn):
     try:
         connection = MySQLdb.connect(HOSTNAME, USERNAME, PASSWORD, DBNAME)
     except:
@@ -51,56 +21,45 @@ def servicelogs_get(services):
         return 0
 
     cursor = connection.cursor()
-    for s in services:
-        cursor.execute("SELECT * from servicelogs WHERE service = %s", (s,))
-        # there should only be one row otherwise something is wrong
-        tup = cursor.fetchone()
-        print tup
-        new_nums.append(tup)
-
-    # DEBUG
-    #cursor.execute("SELECT * FROM servicelogs")
-    #for row in cursor.fetchall():
-    #    print row
-
+    cursor.execute("SELECT * from servicelogs")
+    data = cursor.fetchall()
+    tp_data = process_tp_data(data)
+    if os.path.exists(fn):
+        write_to_tsv(fn, tp_data)
+    else:
+        names = process_names(data) 
+        with open(fn, 'w+') as f:
+            writer = csv.writer(f, delimiter='\t')
+            writer.writerow(names)
+            writer.writerow(tp_data)
     # close connection
     cursor.close()
     connection.commit()
     connection.close()
+    return tp_data
 
-    return new_nums
-
-
-def process_data(data):
-    throughputs = []
-    users = []
+def process_names(data):
+    names = []
     for service in data:
-        throughputs.append(service[1])
-        users.append(service[2])
-    return throughputs, users 
+        names.append(service[0])
+    return names
 
+def process_tp_data(data):
+    throughputs = []
+    for service in data:
+        throughputs.append(service[2])
+    return throughputs
 
-def write_to_tsv(fn, data):
+def write_to_tsv(fn, datarow):
     with open(fn, 'a') as f:
         writer = csv.writer(f, delimiter='\t')
-        writer.writerow(data)
+        writer.writerow(datarow)
 
 
 # main
-# TODO need to figure out how to initialize all this 
 
 def main():
-    # init functions
-    #servicelogs_init(SERVICES)
-    #write_to_tsv(TP_OUTFILE, SERVICES)
-    #write_to_tsv(USERS_OUTFILE, SERVICES)
-
-    new_data = servicelogs_get(SERVICES)
-    tps, users = process_data(new_data)
-
-    write_to_tsv(TP_OUTFILE, tps)
-    write_to_tsv(USERS_OUTFILE, users)
-    
+    new_data = servicelogs_get(TP_OUTFILE) 
 
 if __name__ == "__main__":
     main()
