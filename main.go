@@ -164,7 +164,7 @@ func flowHandler(ch chan flowEvent, flow classify.FiveTuple, wg *sync.WaitGroup)
 				bytesBA += event.amount
 			}
 			// Esther:
-			// Add event amount to servicelogs table if it belongs to a service of interest. 
+			// Add event amount to servicelogs table if it belongs to a service of interest.
 			// Assuming only one of the src or dst can be a service.
 			srcService := FindService(event.flow.Network.Src())
 			dstService := FindService(event.flow.Network.Dst())

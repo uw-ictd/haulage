@@ -27,7 +27,7 @@ def servicelogs_get(fn):
     if os.path.exists(fn):
         write_to_tsv(fn, tp_data)
     else:
-        names = process_names(data) 
+        names = process_names(data)
         with open(fn, 'w+') as f:
             writer = csv.writer(f, delimiter='\t')
             writer.writerow(names)
@@ -59,7 +59,7 @@ def write_to_tsv(fn, datarow):
 # main
 
 def main():
-    new_data = servicelogs_get(TP_OUTFILE) 
+    new_data = servicelogs_get(TP_OUTFILE)
 
 if __name__ == "__main__":
     main()

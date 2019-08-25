@@ -48,15 +48,15 @@ CREATE TABLE `servicelogs` (
 ) ENGINE=InnoDB;
 
 INSERT INTO `servicelogs`(`service`, `aliases`, `totalbytes`, `numusers`) VALUES 
-('total', '', 0, 0), 
-('whatsapp', 'whatsapp', 0, 0), 
-('google', 'google, gmail', 0, 0), 
-('facebook', 'facebook, fbcdn, fbsbx', 0, 0), 
-('twitter', 'twitter, twimg', 0, 0), 
-('youtube', 'youtube, ytimg', 0, 0), 
-('instagram', 'instagram', 0, 0), 
-('wikipedia', 'wikipedia', 0, 0), 
-('akamai', 'akamai', 0, 0), 
-('amazonaws', 'amazonaws', 0, 0), 
-('cloudfront', 'cloudfront', 0, 0), 
+('total', '', 0, 0),
+('whatsapp', 'whatsapp', 0, 0),
+('google', 'google, gmail', 0, 0),
+('facebook', 'facebook, fbcdn, fbsbx', 0, 0),
+('twitter', 'twitter, twimg', 0, 0),
+('youtube', 'youtube, ytimg', 0, 0),
+('instagram', 'instagram', 0, 0),
+('wikipedia', 'wikipedia', 0, 0),
+('akamai', 'akamai', 0, 0),
+('amazonaws', 'amazonaws', 0, 0),
+('cloudfront', 'cloudfront', 0, 0),
 ('cloudflare', 'cloudflare', 0, 0);

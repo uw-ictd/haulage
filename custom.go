@@ -127,7 +127,7 @@ func LogDNS(dnsEvent *classify.DnsMsg, wg *sync.WaitGroup) {
 }
 
 // Esther:
-// Function that calls the storage function that updates the database. 
+// Function that calls the storage function that updates the database.
 // Doing it like this because all of the database accesses (calling storage.Func) seem to come from here, and I wanted to follow your conventions.
 // Feel free to refactor!
 func LogServiceUsage(service string, amount int) {
