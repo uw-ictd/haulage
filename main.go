@@ -330,12 +330,10 @@ func main() {
 
 	log.Info("Initializing context")
 	OnStart(&ctx, params)
-	log.Info("Context initialization complete")
-	// Esther: commented out starting the radius server.
-	//start_radius_server(ctx.db)
-	log.Info("Skipped radius server start")
 	defer Cleanup(&ctx)
-	//log.Info("Context initialization complete")
+	log.Info("Context initialization complete")
+	go start_radius_server(ctx.db)
+	log.Info("Radius server starting")
 
 	var processingGroup sync.WaitGroup
 
