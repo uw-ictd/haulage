@@ -318,7 +318,7 @@ func main() {
 	log.Info("Initializing context")
 	OnStart(&ctx, params)
 	log.Info("Context initialization complete")
-	start_radius_server(ctx.db)
+	// start_radius_server(ctx.db)
 	defer Cleanup(&ctx)
 	log.Info("Context initialization complete")
 
