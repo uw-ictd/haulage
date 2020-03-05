@@ -2,6 +2,9 @@
 [![Build Status](https://travis-ci.org/uw-ictd/haulage.svg?branch=master)](https://travis-ci.org/uw-ictd/haulage)
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](LICENSE)
 
+| WARNING: Our team is currently migrating codebases from OAI to [open5gs](https://github.com/open5gs/open5gs). This migration has created knock-on effects to this repo's database management, which currently does not work. Fix to come in a few weeks! - Spencer, 5 March 2020. |
+| --- |
+
 # haulage
 A golang tool for measuring, logging, and controlling network usage to
 allow billing and analysis.
