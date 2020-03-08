@@ -26,6 +26,8 @@ package: build
 		--output-type deb \
 		--force \
 		--config-files $(CONF_LOCATION) \
+		--after-install ./init/postinst \
+		--after-remove ./init/postrm \
 		--license MPL-2.0 \
 		--vendor uw-ictd \
 		--maintainer matt9j@cs.washington.edu \
@@ -37,7 +39,7 @@ package: build
 		--deb-systemd-restart-after-upgrade \
 		--name haulage \
 		--version $(VERSION) \
-		--depends 'libpcap0.8' \
+		--depends 'libpcap0.8, default-mysql-server, default-mysql-client' \
 		$(BINARY_LOCATION)=/usr/bin/ \
 		$(CONF_LOCATION)=/etc/haulage/
 
