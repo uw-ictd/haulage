@@ -1,7 +1,7 @@
 #!/bin/bash
 
 script=/usr/bin/haulagedb.py
-version=0.9.5
+version=1.0
 
 display_help() {
     echo "COMMANDS:" >&2
