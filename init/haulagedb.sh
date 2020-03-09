@@ -55,7 +55,7 @@ fi
 
 if [ "$1" = "topup" ]; then
 	if [ "$#" -ne 3 ]; then
-		echo "haulagedb: incorrect number of args, format is \"haulagedb topup imsi money\""
+		echo "haulagedb: incorrect number of args, format is \"haulagedb topup imsi bytes\""
 		exit 1
 	fi
 	python3 $script $1 $2 $3
