@@ -36,7 +36,6 @@ package: build
 		--deb-build-depends libpcap-dev \
 		--deb-compression gz \
 		--deb-systemd ./init/haulage.service \
-		--deb-systemd-restart-after-upgrade \
 		--name haulage \
 		--version $(VERSION) \
 		--depends 'libpcap0.8, default-mysql-server, default-mysql-client' \
