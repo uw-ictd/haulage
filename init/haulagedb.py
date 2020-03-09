@@ -9,7 +9,7 @@ import yaml
 #########################################################################
 
 file = open('../config.yml')
-conf = yaml.load(file, Loader=yaml.FullLoader)
+conf = yaml.load(file, Loader=yaml.BaseLoader)
 dbname = conf['custom']['dbLocation']
 db_user = conf['custom']['dbUser']
 db_pass = conf['custom']['dbPass']
@@ -20,18 +20,15 @@ db = MySQLdb.connect(host="localhost",
 		     	 	 db=dbname)
 cursor = db.cursor()
 
-num_args = len(sys.argv)
-command = sys.argv[4]
+command = sys.argv[1]
 
 #########################################################################
 ############### OPTION ONE: ADD A USER TO THE DATABASE ##################
 #########################################################################
 if (command == "add"):
-	imsi = sys.argv[5]
-	msisdn = sys.argv[6]
-	ip = sys.argv[7]
-	key = sys.argv[8]
-	opc = sys.argv[9]
+	imsi = sys.argv[2]
+	msisdn = sys.argv[3]
+	ip = sys.argv[4]
 
 	# TODO: error-handling? Check if imsi/msisdn/ip already in system?
 	print("haulagedb: adding user " + str(imsi))
@@ -47,7 +44,7 @@ if (command == "add"):
 ############### OPTION TWO: REMOVE USER FROM THE DATABASE ###############
 #########################################################################
 elif (command == "remove"):
-	imsi = sys.argv[5]
+	imsi = sys.argv[2]
 
 	print("haulagedb: removing user " + str(imsi))
 
@@ -61,8 +58,8 @@ elif (command == "remove"):
 ############### OPTION THREE: TOPUP (ADD BALANCE TO USER) ###############
 #########################################################################
 elif (command == "topup"):
-	imsi = sys.argv[5]
-	amount = decimal.Decimal(sys.argv[6])
+	imsi = sys.argv[2]
+	amount = decimal.Decimal(sys.argv[3])
 	old_balance = 0
 	new_balance = 0
 
@@ -96,7 +93,7 @@ elif (command == "topup"):
 ############### OPTION FOUR: DISABLE A USER (AND ZERO-OUT BALANCE???) ###
 #########################################################################
 elif (command == "disable"):
-	imsi = sys.argv[5]
+	imsi = sys.argv[2]
 
 	print("haulagedb: disabling user " + str(imsi))
 
@@ -104,7 +101,7 @@ elif (command == "disable"):
 	cursor.execute(commit_str)
 
 elif (command == "enable"):
-	imsi = sys.argv[5]
+	imsi = sys.argv[2]
 
 	print("haulagedb: enabling user " + str(imsi))
 
@@ -112,7 +109,7 @@ elif (command == "enable"):
 	cursor.execute(commit_str)
 
 elif (command == "admin"):
-	imsi = sys.argv[5]
+	imsi = sys.argv[2]
 
 	print("haulagedb: giving admin privileges to user " + str(imsi))
 
@@ -120,7 +117,7 @@ elif (command == "admin"):
 	cursor.execute(commit_str)
 
 elif (command == "noadmin"):
-	imsi = sys.argv[5]
+	imsi = sys.argv[2]
 
 	print("haulagedb: removing admin privileges from user " + str(imsi))
 

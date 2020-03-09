@@ -37,8 +37,10 @@ package: build
 		--deb-compression gz \
 		--name haulage \
 		--version $(VERSION) \
-		--depends 'libpcap0.8, default-mysql-server, default-mysql-client' \
+		--depends 'libpcap0.8, default-mysql-server, default-mysql-client, python3, python3-yaml, python3-mysqldb' \
 		./init/haulage.service=/lib/systemd/system/haulage.service \
+		./init/haulagedb.sh=/usr/bin/haulagedb \
+		./init/haulagedb.py=/usr/bin/haulagedb.py \
 		./haulage.sql=/tmp/haulage_sampledb.sql \
 		$(BINARY_LOCATION)=/usr/bin/ \
 		$(CONF_LOCATION)=/etc/haulage/

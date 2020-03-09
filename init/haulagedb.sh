@@ -1,11 +1,11 @@
 #!/bin/bash
 
-script=/usr/bin/colte/haulagedb.py
+script=/usr/bin/haulagedb.py
 version=0.9.5
 
 display_help() {
     echo "COMMANDS:" >&2
-    echo "   add {imsi ip}: adds a user to the network"
+    echo "   add {imsi msisdn ip}: adds a user to the network"
     echo "   remove {imsi}: removes a user from the network"
     echo "   topup {imsi} {money}: adds money to a user's account"
     echo "   disable {imsi}: sets a user's balance to 0 and kicks them off the network"
@@ -36,11 +36,11 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 if [ "$1" = "add" ]; then
-	if [ "$#" -ne 6 ]; then
-		echo "haulagedb: incorrect number of args, format is \"haulagedb add imsi ip\""
+	if [ "$#" -ne 4 ]; then
+		echo "haulagedb: incorrect number of args, format is \"haulagedb add imsi msisdn ip\""
 		exit 1
 	fi
-	python $script $1 $2 $3
+	python3 $script $1 $2 $3 $4
 	exit 0
 fi
 
@@ -49,7 +49,7 @@ if [ "$1" = "remove" ]; then
 		echo "haulagedb: incorrect number of args, format is \"haulagedb remove imsi\""
 		exit 1
 	fi
-	python $script $1 $2
+	python3 $script $1 $2
 	exit 0
 fi
 
@@ -58,7 +58,7 @@ if [ "$1" = "topup" ]; then
 		echo "haulagedb: incorrect number of args, format is \"haulagedb topup imsi money\""
 		exit 1
 	fi
-	python $script $1 $2 $3
+	python3 $script $1 $2 $3
 	exit 0
 fi
 
@@ -67,7 +67,7 @@ if [ "$1" = "disable" ]; then
 		echo "haulagedb: incorrect number of args, format is \"haulagedb disable imsi\""
 		exit 1
 	fi
-	python $script $1 $2
+	python3 $script $1 $2
 	exit 0
 fi
 
@@ -76,7 +76,7 @@ if [ "$1" = "enable" ]; then
 		echo "haulagedb: incorrect number of args, format is \"haulagedb enable imsi\""
 		exit 1
 	fi
-	python $script $1 $2
+	python3 $script $1 $2
 	exit 0
 fi
 
@@ -85,7 +85,7 @@ if [ "$1" = "admin" ]; then
 		echo "haulagedb: incorrect number of args, format is \"haulagedb admin imsi\""
 		exit 1
 	fi
-	python $script $1 $2
+	python3 $script $1 $2
 	exit 0
 fi
 
@@ -94,7 +94,7 @@ if [ "$1" = "noadmin" ]; then
 		echo "haulagedb: incorrect number of args, format is \"haulagedb noadmin imsi\""
 		exit 1
 	fi
-	python $script $1 $2
+	python3 $script $1 $2
 	exit 0
 fi
 
@@ -109,7 +109,7 @@ fi
 # 		echo "haulagedb: incorrect number of args, format is \"haulagedb sync\""
 # 		exit 1
 # 	fi
-# 	python $script sync
+# 	python3 $script sync
 # fi
 
 display_help
