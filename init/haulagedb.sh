@@ -8,10 +8,10 @@ display_help() {
     echo "   add {imsi msisdn ip}: adds a user to the network"
     echo "   remove {imsi}: removes a user from the network"
     echo "   topup {imsi} {money}: adds money to a user's account"
-    echo "   disable {imsi}: sets a user's balance to 0 and kicks them off the network"
-    echo "   enable {imsi}: gives a user 10MB of data and adds them to the network"
-    echo "   admin {imsi}: gives a user administrative privileges"
-    echo "   noadmin {imsi}: removes a user's administrative privileges"
+    # echo "   disable {imsi}: sets a user's balance to 0 and kicks them off the network"
+    # echo "   enable {imsi}: gives a user 10MB of data and adds them to the network"
+    # echo "   admin {imsi}: gives a user administrative privileges"
+    # echo "   noadmin {imsi}: removes a user's administrative privileges"
     # echo "   sync: runs a sync script to ensure that the database configuration is sane"
     # echo "   reset: WIPES OUT the database and restores it to the sample default"
     echo "   help: displays this message and exits"
@@ -62,41 +62,41 @@ if [ "$1" = "topup" ]; then
 	exit 0
 fi
 
-if [ "$1" = "disable" ]; then
-	if [ "$#" -ne 2 ]; then
-		echo "haulagedb: incorrect number of args, format is \"haulagedb disable imsi\""
-		exit 1
-	fi
-	python3 $script $1 $2
-	exit 0
-fi
+# if [ "$1" = "disable" ]; then
+# 	if [ "$#" -ne 2 ]; then
+# 		echo "haulagedb: incorrect number of args, format is \"haulagedb disable imsi\""
+# 		exit 1
+# 	fi
+# 	python3 $script $1 $2
+# 	exit 0
+# fi
 
-if [ "$1" = "enable" ]; then
-	if [ "$#" -ne 2 ]; then
-		echo "haulagedb: incorrect number of args, format is \"haulagedb enable imsi\""
-		exit 1
-	fi
-	python3 $script $1 $2
-	exit 0
-fi
+# if [ "$1" = "enable" ]; then
+# 	if [ "$#" -ne 2 ]; then
+# 		echo "haulagedb: incorrect number of args, format is \"haulagedb enable imsi\""
+# 		exit 1
+# 	fi
+# 	python3 $script $1 $2
+# 	exit 0
+# fi
 
-if [ "$1" = "admin" ]; then
-	if [ "$#" -ne 2 ]; then
-		echo "haulagedb: incorrect number of args, format is \"haulagedb admin imsi\""
-		exit 1
-	fi
-	python3 $script $1 $2
-	exit 0
-fi
+# if [ "$1" = "admin" ]; then
+# 	if [ "$#" -ne 2 ]; then
+# 		echo "haulagedb: incorrect number of args, format is \"haulagedb admin imsi\""
+# 		exit 1
+# 	fi
+# 	python3 $script $1 $2
+# 	exit 0
+# fi
 
-if [ "$1" = "noadmin" ]; then
-	if [ "$#" -ne 2 ]; then
-		echo "haulagedb: incorrect number of args, format is \"haulagedb noadmin imsi\""
-		exit 1
-	fi
-	python3 $script $1 $2
-	exit 0
-fi
+# if [ "$1" = "noadmin" ]; then
+# 	if [ "$#" -ne 2 ]; then
+# 		echo "haulagedb: incorrect number of args, format is \"haulagedb noadmin imsi\""
+# 		exit 1
+# 	fi
+# 	python3 $script $1 $2
+# 	exit 0
+# fi
 
 # if [ "$1" = "reset" ]; then
 # 	mysql -u $user -p$pass $db < /usr/local/etc/colte/sample_db.sql

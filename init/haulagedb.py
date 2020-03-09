@@ -79,7 +79,7 @@ elif (command == "topup"):
 	# STEP TWO: prompt for confirmation
 	promptstr = "haulagedb: topup user " + str(imsi) + " add " + str(amount) + " to current balance " + str(old_balance) + " to create new balance " + str(new_balance) + "? [Y/n] "
 	while True:
-		answer = raw_input(promptstr)
+		answer = input(promptstr)
 		if (answer == 'y' or answer == 'Y' or answer == ''):
 			print("haulagedb: updating user " + str(imsi) + " setting new balance to " + str(new_balance))
 			commit_str = "UPDATE customers SET balance = " + str(new_balance) + " WHERE imsi = " + imsi
@@ -92,37 +92,37 @@ elif (command == "topup"):
 #########################################################################
 ############### OPTION FOUR: DISABLE A USER (AND ZERO-OUT BALANCE???) ###
 #########################################################################
-elif (command == "disable"):
-	imsi = sys.argv[2]
+# elif (command == "disable"):
+# 	imsi = sys.argv[2]
 
-	print("haulagedb: disabling user " + str(imsi))
+# 	print("haulagedb: disabling user " + str(imsi))
 
-	commit_str = "UPDATE customers SET enabled = 0, data_balance = 0 WHERE imsi = " + imsi
-	cursor.execute(commit_str)
+# 	commit_str = "UPDATE customers SET enabled = 0, data_balance = 0 WHERE imsi = " + imsi
+# 	cursor.execute(commit_str)
 
-elif (command == "enable"):
-	imsi = sys.argv[2]
+# elif (command == "enable"):
+# 	imsi = sys.argv[2]
 
-	print("haulagedb: enabling user " + str(imsi))
+# 	print("haulagedb: enabling user " + str(imsi))
 
-	commit_str = "UPDATE customers SET enabled = 1, data_balance = 10000000 WHERE imsi = " + imsi
-	cursor.execute(commit_str)
+# 	commit_str = "UPDATE customers SET enabled = 1, data_balance = 10000000 WHERE imsi = " + imsi
+# 	cursor.execute(commit_str)
 
-elif (command == "admin"):
-	imsi = sys.argv[2]
+# elif (command == "admin"):
+# 	imsi = sys.argv[2]
 
-	print("haulagedb: giving admin privileges to user " + str(imsi))
+# 	print("haulagedb: giving admin privileges to user " + str(imsi))
 
-	commit_str = "UPDATE customers SET admin = 1 WHERE imsi = " + imsi
-	cursor.execute(commit_str)
+# 	commit_str = "UPDATE customers SET admin = 1 WHERE imsi = " + imsi
+# 	cursor.execute(commit_str)
 
-elif (command == "noadmin"):
-	imsi = sys.argv[2]
+# elif (command == "noadmin"):
+# 	imsi = sys.argv[2]
 
-	print("haulagedb: removing admin privileges from user " + str(imsi))
+# 	print("haulagedb: removing admin privileges from user " + str(imsi))
 
-	commit_str = "UPDATE customers SET admin = 0 WHERE imsi = " + imsi
-	cursor.execute(commit_str)
+# 	commit_str = "UPDATE customers SET admin = 0 WHERE imsi = " + imsi
+# 	cursor.execute(commit_str)
 
 db.commit()
 cursor.close()
