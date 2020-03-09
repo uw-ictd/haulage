@@ -38,7 +38,7 @@ package: build
 		--name haulage \
 		--version $(VERSION) \
 		--depends 'libpcap0.8, default-mysql-server, default-mysql-client' \
-		./init/haulage.service=/lib/systemd/system/haulage.service
+		./init/haulage.service=/lib/systemd/system/haulage.service \
 		$(BINARY_LOCATION)=/usr/bin/ \
 		$(CONF_LOCATION)=/etc/haulage/
 
