@@ -16,6 +16,5 @@ else
 	echo "warning: haulage_db already exists even though debian package was not installed? Not changing anything, just to be safe..."
 fi
 
-### ADD MIGRATIONS HERE?!?
-
+systemctl daemon-reload
 echo "Installed haulage"

@@ -8,7 +8,7 @@ import yaml
 ############### SETUP: LOAD YAML VARS AND CONNECT TO DB #################
 #########################################################################
 
-file = open('../config.yml')
+file = open('/etc/haulage/config.yml')
 conf = yaml.load(file, Loader=yaml.BaseLoader)
 dbname = conf['custom']['dbLocation']
 db_user = conf['custom']['dbUser']
