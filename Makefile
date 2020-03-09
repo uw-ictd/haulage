@@ -48,4 +48,15 @@ package: build
 package-clean:
 	rm haulage_*\.deb
 
+quckstart_ubuntu:
+	wget https://dl.google.com/go/go1.14.linux-amd64.tar.gz
+	sudo tar -C /usr/local -xzf go1.14.linux-amd64.tar.gz
+	rm -rf go1.14.linux-amd64.tar.gz
+	sudo apt-get -y install libpcap-dev ruby ruby-dev rubygems
+	sudo gem install --no-ri --no-rdoc fpm
+	export PATH=$PATH:/usr/local/go/bin
+
+
+sudo apt-get -y install libpcap-dev
+
 clean: package-clean build-clean
