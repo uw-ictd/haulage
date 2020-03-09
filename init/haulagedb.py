@@ -75,11 +75,11 @@ elif (command == "topup"):
 		new_balance = amount + old_balance
 
 	# STEP TWO: prompt for confirmation
-	promptstr = "haulagedb: topup user " + str(imsi) + " add " + str(amount) + " to current bytes " + str(old_balance) + " to create new total bytes " + str(new_balance) + "? [Y/n] "
+	promptstr = "haulagedb: topup user " + str(imsi) + " add " + str(amount) + " bytes to current balance of " + str(old_balance) + " bytes to create new data_balance of " + str(new_balance) + "? [Y/n] "
 	while True:
 		answer = input(promptstr)
 		if (answer == 'y' or answer == 'Y' or answer == ''):
-			print("haulagedb: updating user " + str(imsi) + " setting new bytes to " + str(new_balance))
+			print("haulagedb: updating user " + str(imsi) + " setting new data_balance to " + str(new_balance))
 			commit_str = "UPDATE customers SET data_balance = " + str(new_balance) + " WHERE imsi = " + imsi
 			cursor.execute(commit_str)
 			break

@@ -7,7 +7,7 @@ display_help() {
     echo "COMMANDS:" >&2
     echo "   add {imsi msisdn ip}: adds a user to the network"
     echo "   remove {imsi}: removes a user from the network"
-    echo "   topup {imsi} {money}: adds money to a user's account"
+    echo "   topup {imsi} {bytes}: adds bytes to a user's account"
     # echo "   disable {imsi}: sets a user's balance to 0 and kicks them off the network"
     # echo "   enable {imsi}: gives a user 10MB of data and adds them to the network"
     # echo "   admin {imsi}: gives a user administrative privileges"
