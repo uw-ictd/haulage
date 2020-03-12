@@ -6,7 +6,7 @@ import sys
 import decimal
 import yaml
 
-version = "0.9.6"
+version = "0.0.6"
 
 def display_help():
 	print("COMMANDS:")
