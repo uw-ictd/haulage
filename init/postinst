@@ -1,0 +1,20 @@
+#!/bin/bash
+
+### ONLY create database if it doesn't already exist!
+mysqlshow | grep haulage_db
+if [ $? == 1 ]; then
+	# create haulage_db user and database
+	sudo mysql -e "CREATE DATABASE haulage_db;"
+	sudo mysql -e "CREATE USER haulage_db@localhost IDENTIFIED BY 'haulage_db';"
+	sudo mysql -e "GRANT ALL PRIVILEGES ON haulage_db.* TO haulage_db@localhost;"
+	sudo mysql -e "FLUSH PRIVILEGES;"
+	# import test database
+	mysql -u haulage_db -phaulage_db haulage_db < /tmp/haulage_sampledb.sql
+	echo "created Haulage Database"
+	rm -rf /tmp/haulage_sampledb.sql
+else
+	echo "warning: haulage_db already exists even though debian package was not installed? Not changing anything, just to be safe..."
+fi
+
+systemctl daemon-reload
+echo "Installed haulage"

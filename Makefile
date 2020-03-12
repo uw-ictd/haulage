@@ -26,6 +26,8 @@ package: build
 		--output-type deb \
 		--force \
 		--config-files $(CONF_LOCATION) \
+		--after-install ./init/postinst \
+		--after-remove ./init/postrm \
 		--license MPL-2.0 \
 		--vendor uw-ictd \
 		--maintainer matt9j@cs.washington.edu \
@@ -33,15 +35,24 @@ package: build
 		--url "https://github.com/uw-ictd/haulage" \
 		--deb-build-depends libpcap-dev \
 		--deb-compression gz \
-		--deb-systemd ./init/haulage.service \
-		--deb-systemd-restart-after-upgrade \
 		--name haulage \
 		--version $(VERSION) \
-		--depends 'libpcap0.8' \
+		--depends 'libpcap0.8, default-mysql-server, default-mysql-client, python3, python3-yaml, python3-mysqldb' \
+		./init/haulage.service=/lib/systemd/system/haulage.service \
+		./init/haulagedb.py=/usr/bin/haulagedb \
+		./haulage.sql=/tmp/haulage_sampledb.sql \
 		$(BINARY_LOCATION)=/usr/bin/ \
 		$(CONF_LOCATION)=/etc/haulage/
 
 package-clean:
 	rm haulage_*\.deb
+
+quickstart_ubuntu:
+	wget https://dl.google.com/go/go1.14.linux-amd64.tar.gz
+	sudo tar -C /usr/local -xzf go1.14.linux-amd64.tar.gz
+	rm -rf go1.14.linux-amd64.tar.gz
+	sudo apt-get -y install libpcap-dev ruby ruby-dev rubygems
+	sudo gem install --no-ri --no-rdoc fpm
+	echo 'PATH=$$PATH:/usr/local/go/bin' >> ~/.profile
 
 clean: package-clean build-clean

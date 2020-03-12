@@ -4,6 +4,6 @@ interface: "wlp1s0"
 
 custom:
   reenablePollInterval: "5s"
-  dbLocation: "colte_db"
-  dbUser: "colte_db"
-  dbPass: "colte_db"
+  dbLocation: "haulage_db"
+  dbUser: "haulage_db"
+  dbPass: "haulage_db"
