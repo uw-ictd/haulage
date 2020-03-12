@@ -1,3 +1,8 @@
+### if running, stop it
+sudo systemctl stop haulage
+sudo systemctl disable haulage
+sudo systemctl daemon-reload
+
 ### ONLY if purging, remove database and user
 if [ "$1" = purge ]; then
 	# remove haulage_db user and database

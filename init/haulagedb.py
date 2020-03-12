@@ -1,12 +1,39 @@
+#!/usr/bin/env python3
+
 import MySQLdb
 import os
 import sys
 import decimal
 import yaml
 
+version = "0.9.6"
+
+def display_help():
+	print("COMMANDS:")
+	print("   add {imsi msisdn ip}: adds a user to the network")
+	print("   remove {imsi}: removes a user from the network")
+	print("   topup {imsi} {bytes}: adds bytes to a user's account")
+	print("   help: displays this message and exits")
+
+
 #########################################################################
 ############### SETUP: LOAD YAML VARS AND CONNECT TO DB #################
 #########################################################################
+print("haulagedb: Haulage Database Configuration Tool (" + version + ")")
+
+if (len(sys.argv) <= 1):
+	display_help()
+	exit(0)
+
+command = sys.argv[1]
+
+if (command == "help"):
+	display_help()
+	exit(0)
+
+if os.geteuid() != 0:
+	print("haulagedb: Must run as root!")
+	exit(1)
 
 file = open('/etc/haulage/config.yml')
 conf = yaml.load(file, Loader=yaml.BaseLoader)
@@ -20,12 +47,14 @@ db = MySQLdb.connect(host="localhost",
 		     	 	 db=dbname)
 cursor = db.cursor()
 
-command = sys.argv[1]
-
 #########################################################################
 ############### OPTION ONE: ADD A USER TO THE DATABASE ##################
 #########################################################################
 if (command == "add"):
+	if len(sys.argv) != 5:
+		print("haulagedb: incorrect number of args, format is \"haulagedb add imsi msisdn ip\"")
+		exit(1)
+
 	imsi = sys.argv[2]
 	msisdn = sys.argv[3]
 	ip = sys.argv[4]
@@ -36,7 +65,6 @@ if (command == "add"):
 	commit_str = "INSERT INTO customers (imsi, msisdn) VALUES ('" + imsi + "', '" + msisdn + "')"
 	cursor.execute(commit_str)
 
-	# ip = GENERATE IP ADDRESS?!?
 	commit_str = "INSERT INTO static_ips (imsi, ip) VALUES ('" + imsi + "', '" + ip + "')"
 	cursor.execute(commit_str)
 
@@ -44,6 +72,10 @@ if (command == "add"):
 ############### OPTION TWO: REMOVE USER FROM THE DATABASE ###############
 #########################################################################
 elif (command == "remove"):
+	if len(sys.argv) != 3:
+		print("haulagedb: incorrect number of args, format is \"haulagedb remove imsi\"")
+		exit(1)
+
 	imsi = sys.argv[2]
 
 	print("haulagedb: removing user " + str(imsi))
@@ -58,6 +90,10 @@ elif (command == "remove"):
 ############### OPTION THREE: TOPUP (ADD BALANCE TO USER) ###############
 #########################################################################
 elif (command == "topup"):
+	if len(sys.argv) != 4:
+		print("haulagedb: incorrect number of args, format is \"haulagedb topup imsi bytes\"")
+		exit(1)
+
 	imsi = sys.argv[2]
 	amount = decimal.Decimal(sys.argv[3])
 	old_balance = 0
@@ -87,41 +123,11 @@ elif (command == "topup"):
 			print("haulagedb: cancelling topup operation\n")
 			break
 
-#########################################################################
-############### OPTION FOUR: DISABLE A USER (AND ZERO-OUT BALANCE???) ###
-#########################################################################
-# elif (command == "disable"):
-# 	imsi = sys.argv[2]
-
-# 	print("haulagedb: disabling user " + str(imsi))
-
-# 	commit_str = "UPDATE customers SET enabled = 0, data_balance = 0 WHERE imsi = " + imsi
-# 	cursor.execute(commit_str)
-
-# elif (command == "enable"):
-# 	imsi = sys.argv[2]
-
-# 	print("haulagedb: enabling user " + str(imsi))
-
-# 	commit_str = "UPDATE customers SET enabled = 1, data_balance = 10000000 WHERE imsi = " + imsi
-# 	cursor.execute(commit_str)
-
-# elif (command == "admin"):
-# 	imsi = sys.argv[2]
-
-# 	print("haulagedb: giving admin privileges to user " + str(imsi))
-
-# 	commit_str = "UPDATE customers SET admin = 1 WHERE imsi = " + imsi
-# 	cursor.execute(commit_str)
-
-# elif (command == "noadmin"):
-# 	imsi = sys.argv[2]
-
-# 	print("haulagedb: removing admin privileges from user " + str(imsi))
-
-# 	commit_str = "UPDATE customers SET admin = 0 WHERE imsi = " + imsi
-# 	cursor.execute(commit_str)
+else:
+	display_help()
+	exit(0)
 
 db.commit()
 cursor.close()
 db.close()
+
