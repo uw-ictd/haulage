@@ -41,6 +41,7 @@ type flowEvent struct {
 
 var opts struct {
 	ConfigPath string `short:"c" long:"config" description:"The path to the configuration file" required:"true" default:"/etc/haulage/config.yml"`
+	Verbose []bool `short:"v" long:"verbose" description:"Show debug logging information"`
 }
 
 var config struct {
@@ -292,6 +293,10 @@ func main() {
 	_, err := flags.Parse(&opts)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	if len(opts.Verbose) > 0 {
+		log.SetLevel(log.DebugLevel)
 	}
 
 	parseConfig(opts.ConfigPath)
