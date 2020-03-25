@@ -41,12 +41,15 @@ type flowEvent struct {
 
 var opts struct {
 	ConfigPath string `short:"c" long:"config" description:"The path to the configuration file" required:"true" default:"/etc/haulage/config.yml"`
+	Verbose []bool `short:"v" long:"verbose" description:"Show debug logging information"`
 }
 
 var config struct {
 	FlowLogInterval time.Duration `yaml:"flowLogInterval"`
 	UserLogInterval time.Duration `yaml:"userLogInterval"`
 	Interface       string        `yaml:"interface"`
+	UserSubnet      string        `yaml:"userSubnet"`
+	IgnoredUserAddresses []string `yaml:"ignoredUserAddresses"`
 	Custom          CustomConfig  `yaml:"custom"`
 }
 
@@ -185,7 +188,7 @@ func flowHandler(ch chan flowEvent, flow classify.FiveTuple, wg *sync.WaitGroup)
 }
 
 func generateUsageEvents(flow gopacket.Flow, amount int, wg *sync.WaitGroup) {
-	if classify.User(flow.Src()) {
+	if classify.User(flow.Src(), config.UserSubnet, config.IgnoredUserAddresses) {
 		if classify.Local(flow.Dst()) {
 			sendToUserAggregator(flow.Src(), usageEvent{LOCAL_UP, amount}, wg)
 		} else {
@@ -193,7 +196,7 @@ func generateUsageEvents(flow gopacket.Flow, amount int, wg *sync.WaitGroup) {
 		}
 	}
 
-	if classify.User(flow.Dst()) {
+	if classify.User(flow.Dst(), config.UserSubnet, config.IgnoredUserAddresses) {
 		if classify.Local(flow.Src()) {
 			sendToUserAggregator(flow.Dst(), usageEvent{LOCAL_DOWN, amount}, wg)
 		} else {
@@ -294,6 +297,10 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if len(opts.Verbose) > 0 {
+		log.SetLevel(log.DebugLevel)
+	}
+
 	parseConfig(opts.ConfigPath)
 
 	params := Parameters{
@@ -318,7 +325,7 @@ func main() {
 	log.Info("Initializing context")
 	OnStart(&ctx, params)
 	log.Info("Context initialization complete")
-	start_radius_server(ctx.db)
+	// start_radius_server(ctx.db)
 	defer Cleanup(&ctx)
 	log.Info("Context initialization complete")
 

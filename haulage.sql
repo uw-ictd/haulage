@@ -16,13 +16,13 @@ CREATE TABLE `customers` (
   `admin` tinyint(1) DEFAULT '0',
   `msisdn` varchar(16) NOT NULL,
   PRIMARY KEY (`imsi`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE `static_ips` (
   `imsi` varchar(16) NOT NULL,
   `ip` varchar(16) NOT NULL,
   PRIMARY KEY (`imsi`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE `answers` (
   `host` varchar(255) CHARACTER SET ascii NOT NULL,

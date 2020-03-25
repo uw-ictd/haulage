@@ -29,7 +29,7 @@ func isPrivateIP(ip net.IP) bool {
 }
 
 // Deployment specific logic to determine if traffic is from a user.
-func User(endpoint gopacket.Endpoint) bool {
+func User(endpoint gopacket.Endpoint, userSubnet string, ignoredUserIPs []string) bool {
 	ip := net.ParseIP(endpoint.String())
 	if ip == nil {
 		log.WithField("Endpoint", endpoint).Error("Endpoint is not IP parseable")
@@ -37,11 +37,13 @@ func User(endpoint gopacket.Endpoint) bool {
 	}
 
 	// Exclude specific IPs assigned to our network hardware in the user subnet.
-	if ip.Equal(net.ParseIP("192.168.151.1")) {
-		return false
+	for _, address := range ignoredUserIPs {
+		if ip.Equal(net.ParseIP(address)) {
+			return false
+		}
 	}
 
-	_, userBlock, _ := net.ParseCIDR("192.168.151.0/24")
+	_, userBlock, _ := net.ParseCIDR(userSubnet)
 
 	return userBlock.Contains(ip)
 }
