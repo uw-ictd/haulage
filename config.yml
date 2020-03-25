@@ -1,6 +1,8 @@
 flowLogInterval: "20m"
 userLogInterval: "1m"
 interface: "wlp1s0"
+userSubnet: "192.168.151.0/24"
+ignoredUserAddresses: ["192.168.151.1"]
 
 custom:
   reenablePollInterval: "5s"
