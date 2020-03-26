@@ -6,8 +6,6 @@ import sys
 import decimal
 import yaml
 
-version = "0.0.6"
-
 def display_help():
 	print("COMMANDS:")
 	print("   add {imsi msisdn ip}: adds a user to the network")
@@ -19,7 +17,7 @@ def display_help():
 #########################################################################
 ############### SETUP: LOAD YAML VARS AND CONNECT TO DB #################
 #########################################################################
-print("haulagedb: Haulage Database Configuration Tool (" + version + ")")
+print("haulagedb: Haulage Database Configuration Tool")
 
 if (len(sys.argv) <= 1):
 	display_help()
