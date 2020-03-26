@@ -1,5 +1,5 @@
 # Git VCS parameters
-VERSION=$(shell git describe)
+VERSION=$(shell git describe --tags)
 USER_EMAIL=$(shell git config --get user.email)
 
 # Go parameters
