@@ -1,9 +1,21 @@
 [package]
-name = "haulage-ru"
-version = "0.1.0"
+name = "haulage-rs"
+version = "0.0.1"
 authors = ["Matt Johnson <matt9j@cs.washington.edu>"]
 edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "A lightweight traffic measuring and logging application specialized for billing and analysis in small network deployments."
+license = "MPL-2.0"
+maintenance = "actively-developed"
 
 [dependencies]
+bytes = "0.5.4"
+futures = "0.3.2"
+git-version = "0.3.4"
+pnet_packet = "0.25.0"
+pnet_datalink = "0.25.0"
+slog = "2.5.2"
+slog-async = "2.4.0"
+slog-atomic = "3.0.0"
+slog-journald = "2.1.1"
+slog-term = "2.5.0"
+tokio = { version = "^0.2", features = ["full"] }
