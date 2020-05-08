@@ -32,8 +32,9 @@ allow billing and analysis.
  1) Install the go tools (version >= 1.11) for your platform, available from
     [golang.org](https://golang.org/doc/install)
  2) Install the libpcap library and headers (on debian flavors `apt-get install libpcap-dev`)
- 3a) `go get github.com/uw-ictd/haulage`
- 3b) As an alternative to (3a), clone this repo and then `make build`
+ 3) `go get github.com/uw-ictd/haulage`
+ 
+As an alternative to (3), you could also clone this repo and then `make build`
 
 ## Binary releases
 We currently host/maintain .deb packages for Ubuntu 18.04 and Debian 9. Use
