@@ -68,7 +68,7 @@ network monitoring frameworks already enjoy broad community support.
 For more details check out the [contriubting](CONTRIUBTING.md) page.
 
 # History
-Haulage grew out of a need for the [CoLTE Community Cellular
+The requirements for haulage grew out of a need for the [CoLTE Community Cellular
 Networking project](https://github.com/uw-ictd/colte) to measure
 network utilization to account for spending against prepaid cellular
 data packages and log long-term traffic statistics to aid network
