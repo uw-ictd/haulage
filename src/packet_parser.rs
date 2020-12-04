@@ -1,3 +1,5 @@
+use thiserror::Error;
+
 #[derive(Debug)]
 pub struct FiveTuple {
     pub src: std::net::IpAddr,
@@ -9,36 +11,14 @@ pub struct FiveTuple {
 
 pub type EthernetPacketKind<'a> = pnet_packet::ethernet::EthernetPacket<'a>;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum PacketParseError {
+    #[error("Packet unable to parse, possibly corrupted")]
     BadPacket,
-    NotImplemented,
+    #[error("ARP has no L3 payload")]
     IsArp,
+    #[error("Unhandled transport layer protocol")]
     UnhandledTransport,
-}
-
-impl std::error::Error for PacketParseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match *self {
-            PacketParseError::BadPacket => None,
-            PacketParseError::NotImplemented => None,
-            PacketParseError::IsArp => None,
-            PacketParseError::UnhandledTransport => None,
-        }
-    }
-}
-
-impl std::fmt::Display for PacketParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match *self {
-            PacketParseError::BadPacket => write!(f, "That's a bad packet Harry!"),
-            PacketParseError::NotImplemented => {
-                write!(f, "Parsing for this packet is not implemented")
-            }
-            PacketParseError::IsArp => write!(f, "ARP has no L3 payload"),
-            PacketParseError::UnhandledTransport => write!(f, "Unhandled transport layer protocol"),
-        }
-    }
 }
 
 pub fn parse_ethernet(
