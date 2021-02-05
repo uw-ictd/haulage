@@ -7,20 +7,19 @@ GOCMD=go
 GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
-BINARY_LOCATION=./build/haulage
-CONF_LOCATION=./config.yml
-DESCRIPTION="haulage: a minimalist traffic logging framework"
+
+TARGET_DIR=./build
 
 .PHONY: all build package quickstart_ubuntu build_arm64 build-clean clean
 
 all: build package
 
 build:
-	$(GOBUILD) -o $(BINARY_LOCATION) -v
+	$(GOBUILD) -o $(TARGET_DIR)/haulage -v
 
 build_arm64:
 	# A complex build line is required since gopacket uses the shared libpcap C library.
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/lib/aarch64-linux-gnu/" CC="aarch64-linux-gnu-gcc" $(GOBUILD) -o $(BINARY_LOCATION)-arm64 -v
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/lib/aarch64-linux-gnu/" CC="aarch64-linux-gnu-gcc" $(GOBUILD) -o $(TARGET_DIR)/haulage -v
 
 build-clean:
 	$(GOCLEAN)
@@ -31,13 +30,13 @@ package: build
 	fpm --input-type dir \
 		--output-type deb \
 		--force \
-		--config-files $(CONF_LOCATION) \
+		--config-files ./config.yml \
 		--after-install ./init/postinst \
 		--after-remove ./init/postrm \
 		--license MPL-2.0 \
 		--vendor uw-ictd \
 		--maintainer matt9j@cs.washington.edu \
-		--description $(DESCRIPTION) \
+		--description "haulage: a minimalist traffic logging framework" \
 		--url "https://github.com/uw-ictd/haulage" \
 		--deb-build-depends libpcap-dev \
 		--deb-compression gz \
@@ -47,8 +46,8 @@ package: build
 		./init/haulage.service=/lib/systemd/system/haulage.service \
 		./init/haulagedb.py=/usr/bin/haulagedb \
 		./haulage.sql=/tmp/haulage_sampledb.sql \
-		$(BINARY_LOCATION)=/usr/bin/ \
-		$(CONF_LOCATION)=/etc/haulage/
+		$(TARGET_DIR)/haulage=/usr/bin/ \
+		./config.yml=/etc/haulage/
 
 package-clean:
 	rm haulage_*\.deb
