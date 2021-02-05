@@ -26,32 +26,46 @@ endif
 
 TARGET_DIR=./build
 
-.PHONY: all build package quickstart_ubuntu build_arm64 build-clean clean get_nfpm package-clean
+.PHONY: all build package \
+build_arm64 build_x86_64 build-clean \
+package_arm64 package_x86_64 package-clean \
+clean dist-clean quickstart_ubuntu get_nfpm
 
 all: build package
 
-build:
-	$(GOBUILD) -o $(TARGET_DIR)/haulage -v
+# Define the basic build and package targets for the native build architecture.
+ifeq ($(BUILD_ARCH),aarch64)
+build: build_arm64
+package: package_arm64
+else ifeq ($(BUILD_ARCH),x86_64)
+build: build_x86_64
+package: package_x86_64
+else
+	$(error Unsupported build platform architecture $(BUILD_ARCH))
+endif
 
 build_arm64:
 	# A complex build line is required since gopacket uses the shared libpcap C library.
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/lib/aarch64-linux-gnu/" CC="aarch64-linux-gnu-gcc" $(GOBUILD) -o $(TARGET_DIR)/haulage -v
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/lib/aarch64-linux-gnu/" CC="aarch64-linux-gnu-gcc" $(GOBUILD) -o $(TARGET_DIR)/arm64/haulage -v
+
+build_x86_64:
+	# A complex build line is required since gopacket uses the shared libpcap C library.
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/lib/x86_64-linux-gnu/" CC="x86_64-linux-gnu-gcc" $(GOBUILD) -o $(TARGET_DIR)/amd64/haulage -v
 
 build-clean:
 	$(GOCLEAN)
 
-package: export VERSION := $(VERSION)
-package: build get_nfpm
-	$(info $$VERSION is [${VERSION}])
-	cat nfpm.yaml | \
-	HOST_ARCHITECTURE=amd64 envsubst '$${HOST_ARCHITECTURE}' | \
-	$(TARGET_DIR)/nfpm/nfpm pkg --packager deb --config /dev/stdin --target $(TARGET_DIR)
-
-package_arm64: export VERSION := $(VERSION)
+package_arm64: export HOST_ARCHITECTURE=arm64
 package_arm64: build_arm64 get_nfpm
+
+package_x86_64: export HOST_ARCHITECTURE=amd64
+package_x86_64: build_x86_64 get_nfpm
+
+package_arm64 package_x86_64: export VERSION := $(VERSION)
+package_arm64 package_x86_64:
 	$(info $$VERSION is [${VERSION}])
 	cat nfpm.yaml | \
-	HOST_ARCHITECTURE=arm64 envsubst '$${HOST_ARCHITECTURE}' | \
+	envsubst '$${HOST_ARCHITECTURE}' | \
 	$(TARGET_DIR)/nfpm/nfpm pkg --packager deb --config /dev/stdin --target $(TARGET_DIR)
 
 package-clean:

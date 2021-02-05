@@ -70,7 +70,7 @@ conflicts:
 # This can be binaries or any other files.
 contents:
   # Basic files that applies to all packagers
-  - src: "./build/haulage"
+  - src: "./build/${HOST_ARCHITECTURE}/haulage"
     dst: "/usr/bin/haulage"
 
   - src: "./init/haulagedb.py"
