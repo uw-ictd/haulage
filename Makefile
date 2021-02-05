@@ -7,7 +7,7 @@ GOCMD=go
 GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
-BINARY_LOCATION=./haulage
+BINARY_LOCATION=./build/haulage
 CONF_LOCATION=./config.yml
 DESCRIPTION="haulage: a minimalist traffic logging framework"
 

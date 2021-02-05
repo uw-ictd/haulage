@@ -11,8 +11,11 @@
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
-# Main binary, built with `go build`
+# Main binary, built with bare `go build`
 /haulage
 
 # Packages, built with fpm
 /haulage_*.deb
+
+# Build and packaging products from make
+/build/**
