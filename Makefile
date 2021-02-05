@@ -7,9 +7,20 @@ GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 
+# NFPM parameters
+NFPM_VERSION = 2.2.3
+BUILD_ARCH=$(shell uname -m)
+ifeq ($(BUILD_ARCH),aarch64)
+	NFPM_ARCH=arm64
+else ifeq ($(BUILD_ARCH),x86_64)
+	NFPM_ARCH=x86_64
+else
+	$(error Unsupported build platform architecture $(BUILD_ARCH))
+endif
+
 TARGET_DIR=./build
 
-.PHONY: all build package quickstart_ubuntu build_arm64 build-clean clean
+.PHONY: all build package quickstart_ubuntu build_arm64 build-clean clean get_nfpm package-clean
 
 all: build package
 
@@ -24,15 +35,18 @@ build-clean:
 	$(GOCLEAN)
 
 package: export VERSION := $(VERSION)
-package: build
+package: build get_nfpm
 	$(info $$VERSION is [${VERSION}])
 	cat nfpm.yaml | \
 	TARGET_ARCHITECTURE=amd64 envsubst '$${TARGET_ARCHITECTURE}' | \
-	nfpm pkg --packager deb --config /dev/stdin --target $(TARGET_DIR)
+	$(TARGET_DIR)/nfpm/nfpm pkg --packager deb --config /dev/stdin --target $(TARGET_DIR)
 
 package-clean:
 	rm $(TARGET_DIR)/haulage_*\.deb
 
+clean: package-clean build-clean
+
+# Helper rules for installing build dependencies and tooling.
 quickstart_ubuntu:
 	wget https://dl.google.com/go/go1.14.linux-amd64.tar.gz
 	sudo tar -C /usr/local -xzf go1.14.linux-amd64.tar.gz
@@ -40,4 +54,8 @@ quickstart_ubuntu:
 	sudo apt-get -y install libpcap-dev
 	echo 'PATH=$$PATH:/usr/local/go/bin' >> ~/.profile
 
-clean: package-clean build-clean
+get_nfpm: $(TARGET_DIR)/nfpm/nfpm
+
+$(TARGET_DIR)/nfpm/nfpm:
+	mkdir -p $(@D)
+	curl -L https://github.com/goreleaser/nfpm/releases/download/v$(NFPM_VERSION)/nfpm_$(NFPM_VERSION)_Linux_$(NFPM_ARCH).tar.gz | tar -xz --directory "$(TARGET_DIR)/nfpm"
