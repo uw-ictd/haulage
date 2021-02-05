@@ -16,6 +16,10 @@ all: build package
 build:
 	$(GOBUILD) -o $(BINARY_LOCATION) -v
 
+build_arm64:
+	# A complex build line is required since gopacket uses the shared libpcap C library.
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/lib/aarch64-linux-gnu/" CC="aarch64-linux-gnu-gcc" $(GOBUILD) -o $(BINARY_LOCATION)-arm64 -v
+
 build-clean:
 	$(GOCLEAN)
 
