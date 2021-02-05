@@ -42,9 +42,12 @@ package: build get_nfpm
 	$(TARGET_DIR)/nfpm/nfpm pkg --packager deb --config /dev/stdin --target $(TARGET_DIR)
 
 package-clean:
-	rm $(TARGET_DIR)/haulage_*\.deb
+	rm -f $(TARGET_DIR)/haulage_*\.deb
 
 clean: package-clean build-clean
+
+dist-clean: clean
+	rm -rf $(TARGET_DIR)
 
 # Helper rules for installing build dependencies and tooling.
 quickstart_ubuntu:
