@@ -47,6 +47,13 @@ package: build get_nfpm
 	HOST_ARCHITECTURE=amd64 envsubst '$${HOST_ARCHITECTURE}' | \
 	$(TARGET_DIR)/nfpm/nfpm pkg --packager deb --config /dev/stdin --target $(TARGET_DIR)
 
+package_arm64: export VERSION := $(VERSION)
+package_arm64: build_arm64 get_nfpm
+	$(info $$VERSION is [${VERSION}])
+	cat nfpm.yaml | \
+	HOST_ARCHITECTURE=arm64 envsubst '$${HOST_ARCHITECTURE}' | \
+	$(TARGET_DIR)/nfpm/nfpm pkg --packager deb --config /dev/stdin --target $(TARGET_DIR)
+
 package-clean:
 	rm -f $(TARGET_DIR)/haulage_*\.deb
 
