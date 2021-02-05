@@ -9,6 +9,12 @@ GOTEST=$(GOCMD) test
 
 # NFPM parameters
 NFPM_VERSION = 2.2.3
+# This uses the somewhat confusing but standardized GNU architecture naming
+# scheme to be consistent with Debian (which can handle the complex case of
+# building compilers for different architectures). Build refers to the
+# architecure of the platform doing this build. Host refers to the architecture
+# we are building the binary to run on. Target refers to the architecture that
+# built binary emits, if it's a compiler.
 BUILD_ARCH=$(shell uname -m)
 ifeq ($(BUILD_ARCH),aarch64)
 	NFPM_ARCH=arm64
@@ -38,7 +44,7 @@ package: export VERSION := $(VERSION)
 package: build get_nfpm
 	$(info $$VERSION is [${VERSION}])
 	cat nfpm.yaml | \
-	TARGET_ARCHITECTURE=amd64 envsubst '$${TARGET_ARCHITECTURE}' | \
+	HOST_ARCHITECTURE=amd64 envsubst '$${HOST_ARCHITECTURE}' | \
 	$(TARGET_DIR)/nfpm/nfpm pkg --packager deb --config /dev/stdin --target $(TARGET_DIR)
 
 package-clean:

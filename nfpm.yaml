@@ -1,5 +1,5 @@
 name: "haulage"
-arch: "${TARGET_ARCHITECTURE}"
+arch: "${HOST_ARCHITECTURE}"
 platform: "linux"
 
 # Upstream Version. (required)
