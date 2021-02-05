@@ -11,6 +11,8 @@ BINARY_LOCATION=./haulage
 CONF_LOCATION=./config.yml
 DESCRIPTION="haulage: a minimalist traffic logging framework"
 
+.PHONY: all build package quickstart_ubuntu build_arm64 build-clean clean
+
 all: build package
 
 build:
