@@ -1,6 +1,5 @@
 # Git VCS parameters
 VERSION=$(shell git describe --tags)
-USER_EMAIL=$(shell git config --get user.email)
 
 # Go parameters
 GOCMD=go
@@ -24,40 +23,21 @@ build_arm64:
 build-clean:
 	$(GOCLEAN)
 
+package: export VERSION := $(VERSION)
 package: build
 	$(info $$VERSION is [${VERSION}])
-	$(info $$USER_EMAIL is [${USER_EMAIL}])
-	fpm --input-type dir \
-		--output-type deb \
-		--force \
-		--config-files ./config.yml \
-		--after-install ./init/postinst \
-		--after-remove ./init/postrm \
-		--license MPL-2.0 \
-		--vendor uw-ictd \
-		--maintainer matt9j@cs.washington.edu \
-		--description "haulage: a minimalist traffic logging framework" \
-		--url "https://github.com/uw-ictd/haulage" \
-		--deb-build-depends libpcap-dev \
-		--deb-compression gz \
-		--name haulage \
-		--version $(VERSION) \
-		--depends 'libpcap0.8, default-mysql-server, default-mysql-client, python3, python3-yaml, python3-mysqldb' \
-		./init/haulage.service=/lib/systemd/system/haulage.service \
-		./init/haulagedb.py=/usr/bin/haulagedb \
-		./haulage.sql=/tmp/haulage_sampledb.sql \
-		$(TARGET_DIR)/haulage=/usr/bin/ \
-		./config.yml=/etc/haulage/
+	cat nfpm.yaml | \
+	TARGET_ARCHITECTURE=amd64 envsubst '$${TARGET_ARCHITECTURE}' | \
+	nfpm pkg --packager deb --config /dev/stdin --target $(TARGET_DIR)
 
 package-clean:
-	rm haulage_*\.deb
+	rm $(TARGET_DIR)/haulage_*\.deb
 
 quickstart_ubuntu:
 	wget https://dl.google.com/go/go1.14.linux-amd64.tar.gz
 	sudo tar -C /usr/local -xzf go1.14.linux-amd64.tar.gz
 	rm -rf go1.14.linux-amd64.tar.gz
-	sudo apt-get -y install libpcap-dev ruby ruby-dev rubygems
-	sudo gem install --no-ri --no-rdoc fpm
+	sudo apt-get -y install libpcap-dev
 	echo 'PATH=$$PATH:/usr/local/go/bin' >> ~/.profile
 
 clean: package-clean build-clean
