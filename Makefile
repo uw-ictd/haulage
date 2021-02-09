@@ -1,5 +1,5 @@
 # Git VCS parameters
-VERSION=$(shell git describe --tags)
+VERSION=$(shell git describe --tags | sed s/-g/+g/g)
 
 # Go parameters
 GOCMD=go
