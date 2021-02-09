@@ -1,58 +1,91 @@
 # Git VCS parameters
 VERSION=$(shell git describe --tags)
-USER_EMAIL=$(shell git config --get user.email)
 
 # Go parameters
 GOCMD=go
 GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
-BINARY_LOCATION=./haulage
-CONF_LOCATION=./config.yml
-DESCRIPTION="haulage: a minimalist traffic logging framework"
+
+# NFPM parameters
+NFPM_VERSION = 2.2.3
+# This uses the somewhat confusing but standardized GNU architecture naming
+# scheme to be consistent with Debian (which can handle the complex case of
+# building compilers for different architectures). Build refers to the
+# architecure of the platform doing this build. Host refers to the architecture
+# we are building the binary to run on. Target refers to the architecture that
+# built binary emits, if it's a compiler.
+BUILD_ARCH=$(shell uname -m)
+ifeq ($(BUILD_ARCH),aarch64)
+	NFPM_ARCH=arm64
+else ifeq ($(BUILD_ARCH),x86_64)
+	NFPM_ARCH=x86_64
+else
+	$(error Unsupported build platform architecture $(BUILD_ARCH))
+endif
+
+TARGET_DIR=./build
+
+.PHONY: all build package \
+build_arm64 build_x86_64 build-clean \
+package_arm64 package_x86_64 package-clean \
+clean dist-clean quickstart_ubuntu get_nfpm
 
 all: build package
 
-build:
-	$(GOBUILD) -o $(BINARY_LOCATION) -v
+# Define the basic build and package targets for the native build architecture.
+ifeq ($(BUILD_ARCH),aarch64)
+build: build_arm64
+package: package_arm64
+else ifeq ($(BUILD_ARCH),x86_64)
+build: build_x86_64
+package: package_x86_64
+else
+	$(error Unsupported build platform architecture $(BUILD_ARCH))
+endif
+
+build_arm64:
+	# A complex build line is required since gopacket uses the shared libpcap C library.
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/lib/aarch64-linux-gnu/" CC="aarch64-linux-gnu-gcc" $(GOBUILD) -o $(TARGET_DIR)/arm64/haulage -v
+
+build_x86_64:
+	# A complex build line is required since gopacket uses the shared libpcap C library.
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/lib/x86_64-linux-gnu/" CC="x86_64-linux-gnu-gcc" $(GOBUILD) -o $(TARGET_DIR)/amd64/haulage -v
 
 build-clean:
 	$(GOCLEAN)
 
-package: build
+package_arm64: export HOST_ARCHITECTURE=arm64
+package_arm64: build_arm64 get_nfpm
+
+package_x86_64: export HOST_ARCHITECTURE=amd64
+package_x86_64: build_x86_64 get_nfpm
+
+package_arm64 package_x86_64: export VERSION := $(VERSION)
+package_arm64 package_x86_64:
 	$(info $$VERSION is [${VERSION}])
-	$(info $$USER_EMAIL is [${USER_EMAIL}])
-	fpm --input-type dir \
-		--output-type deb \
-		--force \
-		--config-files $(CONF_LOCATION) \
-		--after-install ./init/postinst \
-		--after-remove ./init/postrm \
-		--license MPL-2.0 \
-		--vendor uw-ictd \
-		--maintainer matt9j@cs.washington.edu \
-		--description $(DESCRIPTION) \
-		--url "https://github.com/uw-ictd/haulage" \
-		--deb-build-depends libpcap-dev \
-		--deb-compression gz \
-		--name haulage \
-		--version $(VERSION) \
-		--depends 'libpcap0.8, default-mysql-server, default-mysql-client, python3, python3-yaml, python3-mysqldb' \
-		./init/haulage.service=/lib/systemd/system/haulage.service \
-		./init/haulagedb.py=/usr/bin/haulagedb \
-		./haulage.sql=/tmp/haulage_sampledb.sql \
-		$(BINARY_LOCATION)=/usr/bin/ \
-		$(CONF_LOCATION)=/etc/haulage/
+	cat nfpm.yaml | \
+	envsubst '$${HOST_ARCHITECTURE}' | \
+	$(TARGET_DIR)/nfpm/nfpm pkg --packager deb --config /dev/stdin --target $(TARGET_DIR)
 
 package-clean:
-	rm haulage_*\.deb
+	rm -f $(TARGET_DIR)/haulage_*\.deb
 
+clean: package-clean build-clean
+
+dist-clean: clean
+	rm -rf $(TARGET_DIR)
+
+# Helper rules for installing build dependencies and tooling.
 quickstart_ubuntu:
 	wget https://dl.google.com/go/go1.14.linux-amd64.tar.gz
 	sudo tar -C /usr/local -xzf go1.14.linux-amd64.tar.gz
 	rm -rf go1.14.linux-amd64.tar.gz
-	sudo apt-get -y install libpcap-dev ruby ruby-dev rubygems
-	sudo gem install --no-ri --no-rdoc fpm
+	sudo apt-get -y install libpcap-dev
 	echo 'PATH=$$PATH:/usr/local/go/bin' >> ~/.profile
 
-clean: package-clean build-clean
+get_nfpm: $(TARGET_DIR)/nfpm/nfpm
+
+$(TARGET_DIR)/nfpm/nfpm:
+	mkdir -p $(@D)
+	curl -L https://github.com/goreleaser/nfpm/releases/download/v$(NFPM_VERSION)/nfpm_$(NFPM_VERSION)_Linux_$(NFPM_ARCH).tar.gz | tar -xz --directory "$(TARGET_DIR)/nfpm"

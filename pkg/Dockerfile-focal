@@ -1,0 +1,29 @@
+FROM ubuntu:focal
+
+# Add ubuntu ports repos and make ubuntu default repos architecture specific.
+# Ubuntu does the world the great service of hosting different architectures at
+# different domains, without specifying that their repos are architecture
+# specific in the sources list :/
+RUN mv /etc/apt/sources.list /etc/apt/sources.list.original
+COPY ./pkg/cross-compile-sources-list-focal /etc/apt/sources.list
+
+# Add required cross-compiler architectures
+RUN dpkg --add-architecture arm64
+RUN apt-get update
+
+# Install dependencies and cross compile toolchain
+RUN DEBIAN_FRONTEND=noninteractive apt-get install --yes apt-utils
+# The dockerfile currently assumes an amd64 build machine.
+RUN DEBIAN_FRONTEND=noninteractive apt-get install --yes make git curl libpcap-dev libpcap-dev:arm64 gcc-aarch64-linux-gnu gcc gettext-base
+
+# Install modern version of golang (>=1.13.0 for full module support)
+RUN curl -L https://golang.org/dl/go1.15.7.linux-amd64.tar.gz | tar --directory /usr/local -xz
+
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+COPY ./ /haulage
+COPY ./pkg/docker-entrypoint.sh /haulage
+
+WORKDIR /haulage
+
+ENTRYPOINT ["/usr/bin/env", "bash", "/haulage/docker-entrypoint.sh", "ubuntu20.04", "focal"]
