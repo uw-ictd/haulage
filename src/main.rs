@@ -2,9 +2,6 @@ use git_version::git_version;
 
 use slog::*;
 
-use tokio::net::TcpListener;
-use tokio::prelude::*;
-
 mod packet_parser;
 
 #[tokio::main]
