@@ -1,8 +1,20 @@
 use git_version::git_version;
-
 use slog::*;
+use structopt::StructOpt;
 
 mod packet_parser;
+
+#[derive(Debug, StructOpt)]
+#[structopt(name = "haulage", about = "A small-scale traffic monitor.")]
+struct Opt {
+    /// The path of the configuration file.
+    #[structopt(short = "c", long = "config", default_value = "/etc/haulage/config.yml")]
+    config: std::path::PathBuf,
+
+    /// Show debug log information
+    #[structopt(short = "v", long = "verebose")]
+    verbose: bool,
+}
 
 #[tokio::main]
 async fn main() {
@@ -12,11 +24,19 @@ async fn main() {
         fallback = "unknown"
     );
 
+    // Parse input arguments
+    let opt = Opt::from_args();
+
     // Setup slog terminal logging
     let log_decorator = slog_term::PlainDecorator::new(std::io::stdout());
     let drain = slog_term::CompactFormat::new(log_decorator).build().fuse();
-    // TODO(matt9j) Set the log level based on command line flags.
-    let drain = slog::LevelFilter::new(drain, Level::Debug).fuse();
+
+    let mut log_level = Level::Info;
+    if opt.verbose {
+        log_level = Level::Debug;
+    }
+
+    let drain = slog::LevelFilter::new(drain, log_level).fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
 
     let root_log = slog::Logger::root(
@@ -25,6 +45,8 @@ async fn main() {
         "pkg-version" => env!("CARGO_PKG_VERSION"),
         ),
     );
+
+    slog::info!(root_log, "Arguments {:?}", opt);
 
     let interface_name: &str = "wlp1s0";
 
