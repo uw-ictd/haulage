@@ -1,15 +1,16 @@
 [package]
-name = "haulage-rs"
+name = "haulage"
 version = "0.0.1"
 authors = ["Matt Johnson <matt9j@cs.washington.edu>"]
 edition = "2018"
 description = "A lightweight traffic measuring and logging application specialized for billing and analysis in small network deployments."
 license = "MPL-2.0"
 maintenance = "actively-developed"
+repository = "https://github.com/uw-ictd/haulage"
 
 [dependencies]
 anyhow = "1.0.34"
-bytes = "0.6.0"
+bytes = "1.0.1"
 git-version = "0.3.4"
 pnet_packet = "0.27.2"
 pnet_datalink = "0.27.2"
@@ -19,4 +20,4 @@ slog-atomic = "3.0.0"
 slog-journald = "2.1.1"
 slog-term = "2.5.0"
 thiserror = "1.0.22"
-tokio = { version = "^0.3.5", features = ["full"] }
+tokio = { version = "^1.5.0", features = ["full"] }
