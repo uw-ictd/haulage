@@ -72,63 +72,37 @@ async fn main() {
 
     let interface_log = root_log.new(o!("interface" => String::from(&interface.name[..])));
 
-    for _ in 0..100 {
+    loop {
         match rx.next() {
             Ok(packet) => {
-                match packet_parser::parse_ethernet(
-                    packet_parser::EthernetPacketKind::new(packet).unwrap(),
-                    &interface_log,
-                ) {
-                    Ok(fivetuple) => {
-                        slog::debug!(interface_log, "Received fivetuple {:?}", fivetuple);
-                    }
-                    Err(e) => match e {
-                        packet_parser::PacketParseError::IsArp => {
-                            slog::debug!(interface_log, "Got an arp top level!");
-                        }
-                        _ => {
-                            slog::debug! {interface_log, "Some other error {}", e};
-                        }
-                    },
-                }
+                let packet_data_copy = bytes::Bytes::copy_from_slice(packet);
+                let packet_log =interface_log.new(o!());
+                tokio::task::spawn(async move {
+                    handle_packet(packet_data_copy, packet_log).await;
+                });
             }
             Err(e) => {
                 slog::error!(interface_log, "packetdump unable to receive packet: {}", e);
             }
         }
     }
+}
 
-    slog::error!(root_log, "Uh oh got far!");
-
-    let addr = "127.0.0.1:4567";
-    // let mut socket_listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    //
-    // let server = async move {
-    //     let mut incoming = socket_listener.incoming();
-    //     while let Some(socket_connection) = incoming.next().await {
-    //         match socket_connection {
-    //             Err(e) => {
-    //                 // Handle an error by printing like a boss.
-    //                 eprintln!("accept error = {:?}", e);
-    //             }
-    //             Ok(mut socket) => {
-    //                 println!("Accepted a connection from {:?}", socket.peer_addr());
-    //                 // One day we'll do something here...
-    //                 tokio::spawn(async move {
-    //                     let (mut reader, mut writer) = socket.split();
-    //                     match tokio::io::copy(&mut reader, &mut writer).await {
-    //                         Ok(amount_copied) => {
-    //                             println!("We wrote {} bytes", amount_copied);
-    //                         }
-    //                         Err(e) => eprintln!("IO copy error {:?}", e),
-    //                     }
-    //                 });
-    //             }
-    //         }
-    //     }
-    // };
-
-    slog::info!(root_log, "Server running on {:?}", addr);
-
-    // server.await;
+async fn handle_packet<'a>(packet: bytes::Bytes, log: Logger) -> () {
+    match packet_parser::parse_ethernet(
+        packet_parser::EthernetPacketKind::new(&packet).unwrap(),
+        &log,
+    ) {
+        Ok(fivetuple) => {
+            slog::debug!(log, "Received fivetuple {:?}", fivetuple);
+        }
+        Err(e) => match e {
+            packet_parser::PacketParseError::IsArp => {
+                slog::debug!(log, "Got an arp top level!");
+            }
+            _ => {
+                slog::debug! {log, "Some other error {}", e};
+            }
+        },
+    }
 }
