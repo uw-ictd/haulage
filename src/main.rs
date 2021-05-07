@@ -2,6 +2,7 @@ use git_version::git_version;
 use slog::*;
 use structopt::StructOpt;
 
+mod async_aggregator;
 mod packet_parser;
 
 #[derive(Debug, StructOpt)]
@@ -48,6 +49,10 @@ async fn main() {
 
     slog::info!(root_log, "Arguments {:?}", opt);
 
+    // Create the main user aggregator
+    let user_aggregator = async_aggregator::AsyncAggregator::new(root_log.new(o!("aggregator" => "user")));
+    println!("user_aggreagator {:?}", user_aggregator);
+
     let interface_name: &str = "wlp1s0";
 
     // This is a lambda closure to do a match in the filter function! Cool...
@@ -77,8 +82,9 @@ async fn main() {
             Ok(packet) => {
                 let packet_data_copy = bytes::Bytes::copy_from_slice(packet);
                 let packet_log =interface_log.new(o!());
+                let channel = user_aggregator.clone_input_channel();
                 tokio::task::spawn(async move {
-                    handle_packet(packet_data_copy, packet_log).await;
+                    handle_packet(packet_data_copy, channel, packet_log).await;
                 });
             }
             Err(e) => {
@@ -88,12 +94,17 @@ async fn main() {
     }
 }
 
-async fn handle_packet<'a>(packet: bytes::Bytes, log: Logger) -> () {
+async fn handle_packet<'a>(packet: bytes::Bytes, user_agg_channel: tokio::sync::mpsc::Sender<async_aggregator::Message>, log: Logger) -> () {
     match packet_parser::parse_ethernet(
         packet_parser::EthernetPacketKind::new(&packet).unwrap(),
         &log,
     ) {
         Ok(fivetuple) => {
+            // ToDo(matt9j) This overcounts the L2 and IP header. Specifically want to measure IP payload.
+            let packet_length = packet.len() as u64;
+            user_agg_channel.send(async_aggregator::Message::Report{id: fivetuple.src, amount: packet_length}).await.unwrap_or_else(
+                |e| slog::error!(log, "Failed to send to dispatcher"; "error" => e.to_string())
+            );
             slog::debug!(log, "Received fivetuple {:?}", fivetuple);
         }
         Err(e) => match e {
