@@ -15,7 +15,7 @@ import os
 import shutil
 import subprocess
 
-DISTRIBUTIONS = ["buster", "bionic", "focal"]
+DISTRIBUTIONS = ["buster", "bionic", "focal", "bullseye"]
 
 def _setup_workspace(workspace_path):
     """ Setup a barebones workspace with the correct directory structure and files.
