@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+mod parse_dns;
+
 #[derive(Debug)]
 pub struct FiveTuple {
     pub src: std::net::IpAddr,
