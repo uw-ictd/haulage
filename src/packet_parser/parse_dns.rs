@@ -11,14 +11,8 @@ pub enum DnsParseError {
     ParseFailure(#[from] domain::base::octets::ParseError),
     #[error("Unable to parse packet question")]
     ParseQuestionFailure,
-    #[error("Unable to parse packet answer for question type")]
-    ParseAnswerFailure,
     #[error("Not DNS Response")]
     NotDnsResponse,
-    #[error("Lookup failed")]
-    LookupFailed,
-    #[error("Temp general error")]
-    GeneralError,
 }
 
 #[derive(Debug, PartialEq)]
@@ -34,8 +28,9 @@ fn parse_dns_payload(
 ) -> Result<DnsResponse, DnsParseError> {
     let parsed_message = domain::base::message::Message::from_octets(packet)?;
 
-    // ToDo(matt9j) Eventually ignore non-answers.
-    // let is_answer = parsed_message.header().opcode();
+    if !parsed_message.header().qr() {
+        return Err(DnsParseError::NotDnsResponse);
+    }
 
     // Only handle the common case of a single question due to ambiguity in the
     // current IETF standard ca. 2021.
@@ -64,7 +59,6 @@ fn parse_dns_payload(
             }
             domain::rdata::AllRecordData::Cname(parsed_answer) => {
                 current_canonical_name = parsed_answer.cname().clone();
-                slog::debug!{logger, "parsed DNS answer {:?}", parsed_answer};
             }
             _ => {
                 continue;
@@ -81,8 +75,6 @@ fn parse_dns_payload(
 
 #[cfg(test)]
 mod tests {
-    use std::net::IpAddr;
-
     use super::{parse_dns_payload, DnsParseError, DnsResponse};
 
     const TEST_DNS_AAAA_PAYLOAD: &str = "e5428180000100040000000004786b636403636f6d00001c0001c00c001c00010000065800102a044e42000000000000000000000067c00c001c00010000065800102a044e42020000000000000000000067c00c001c00010000065800102a044e42040000000000000000000067c00c001c00010000065800102a044e42060000000000000000000067";
