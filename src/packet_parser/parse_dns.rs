@@ -22,7 +22,7 @@ pub struct DnsResponse {
 }
 
 
-fn parse_dns_payload(
+pub fn parse_dns_payload(
     packet: &[u8],
     logger: &slog::Logger,
 ) -> Result<DnsResponse, DnsParseError> {
