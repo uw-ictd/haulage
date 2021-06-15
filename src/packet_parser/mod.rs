@@ -3,6 +3,13 @@ use thiserror::Error;
 mod parse_dns;
 
 #[derive(Debug)]
+pub struct PacketInfo {
+    pub fivetuple: FiveTuple,
+    pub ip_payload_length: u16,
+    pub dns_response: Option<parse_dns::DnsResponse>,
+}
+
+#[derive(Debug)]
 pub struct FiveTuple {
     pub src: std::net::IpAddr,
     pub dst: std::net::IpAddr,
@@ -26,7 +33,7 @@ pub enum PacketParseError {
 pub fn parse_ethernet(
     ethernet: EthernetPacket,
     logger: &slog::Logger,
-) -> Result<FiveTuple, PacketParseError> {
+) -> Result<PacketInfo, PacketParseError> {
     match ethernet.get_ethertype() {
         EtherTypes::Ipv4 => parse_ipv4(&ethernet, logger),
         EtherTypes::Ipv6 => parse_ipv6(&ethernet, logger),
@@ -58,11 +65,12 @@ use pnet_packet::{PacketSize, PrimitiveValues};
 fn parse_ipv4(
     ethernet: &EthernetPacket,
     logger: &slog::Logger,
-) -> Result<FiveTuple, PacketParseError> {
+) -> Result<PacketInfo, PacketParseError> {
     match Ipv4Packet::new(ethernet.payload()) {
         Some(header) => parse_transport(
             std::net::IpAddr::V4(header.get_source()),
             std::net::IpAddr::V4(header.get_destination()),
+            header.get_total_length(),
             header.get_next_level_protocol(),
             header.payload(),
             logger,
@@ -99,22 +107,29 @@ fn create_unknown_transport_fivetuple(
 fn parse_ipv6(
     ethernet: &EthernetPacket,
     logger: &slog::Logger,
-) -> Result<FiveTuple, PacketParseError> {
+) -> Result<PacketInfo, PacketParseError> {
     match Ipv6Packet::new(ethernet.payload()) {
         Some(header) => parse_transport(
             std::net::IpAddr::V6(header.get_source()),
             std::net::IpAddr::V6(header.get_destination()),
+            header.get_payload_length(),
             header.get_next_header(),
             header.payload(),
             logger,
         )
         .or_else(|e| match e {
-            PacketParseError::UnhandledTransport => Ok(create_unknown_transport_fivetuple(
-                std::net::IpAddr::V6(header.get_source()),
-                std::net::IpAddr::V6(header.get_destination()),
-                header.get_next_header(),
-                logger,
-            )),
+            PacketParseError::UnhandledTransport => Ok(
+                PacketInfo {
+                    fivetuple: create_unknown_transport_fivetuple(
+                        std::net::IpAddr::V6(header.get_source()),
+                        std::net::IpAddr::V6(header.get_destination()),
+                        header.get_next_header(),
+                        logger,
+                    ),
+                    ip_payload_length: header.get_payload_length(),
+                    dns_response: None,
+                }
+            ),
             _ => Err(e),
         }),
         None => {
@@ -124,26 +139,28 @@ fn parse_ipv6(
     }
 }
 
-fn parse_transport(
+fn parse_transport (
     source: std::net::IpAddr,
     destination: std::net::IpAddr,
+    ip_payload_length: u16,
     protocol: IpNextHeaderProtocol,
     packet: &[u8],
     logger: &slog::Logger,
-) -> Result<FiveTuple, PacketParseError> {
+) -> Result<PacketInfo, PacketParseError> {
     match protocol {
-        IpNextHeaderProtocols::Udp => parse_transport_udp(source, destination, packet, logger),
-        IpNextHeaderProtocols::Tcp => parse_transport_tcp(source, destination, packet, logger),
+        IpNextHeaderProtocols::Udp => parse_transport_udp(source, destination, ip_payload_length, packet, logger),
+        IpNextHeaderProtocols::Tcp => parse_transport_tcp(source, destination, ip_payload_length, packet, logger),
         _ => Err(PacketParseError::UnhandledTransport),
     }
 }
 
-fn parse_transport_udp(
+fn parse_transport_udp (
     source: std::net::IpAddr,
     destination: std::net::IpAddr,
+    ip_payload_length: u16,
     packet: &[u8],
     logger: &slog::Logger,
-) -> Result<FiveTuple, PacketParseError> {
+) -> Result<PacketInfo, PacketParseError> {
     match UdpPacket::new(packet) {
         Some(udp) => {
             let src_port = udp.get_source();
@@ -157,12 +174,16 @@ fn parse_transport_udp(
                 dst_port,
                 packet.len()
             );
-            Ok(FiveTuple {
-                src: source,
-                dst: destination,
-                src_port,
-                dst_port,
-                protocol: IpNextHeaderProtocols::Udp.to_primitive_values().0,
+            Ok(PacketInfo {
+                fivetuple: FiveTuple {
+                    src: source,
+                    dst: destination,
+                    src_port,
+                    dst_port,
+                    protocol: IpNextHeaderProtocols::Udp.to_primitive_values().0,
+                },
+                ip_payload_length: ip_payload_length,
+                dns_response: None,
             })
         }
         None => {
@@ -175,9 +196,10 @@ fn parse_transport_udp(
 fn parse_transport_tcp(
     source: std::net::IpAddr,
     destination: std::net::IpAddr,
+    ip_payload_length: u16,
     packet: &[u8],
     logger: &slog::Logger,
-) -> Result<FiveTuple, PacketParseError> {
+) -> Result<PacketInfo, PacketParseError> {
     match TcpPacket::new(packet) {
         Some(tcp) => {
             let src_port = tcp.get_source();
@@ -191,12 +213,16 @@ fn parse_transport_tcp(
                 dst_port,
                 packet.len()
             );
-            Ok(FiveTuple {
-                src: source,
-                dst: destination,
-                src_port,
-                dst_port,
-                protocol: IpNextHeaderProtocols::Tcp.to_primitive_values().0,
+            Ok(PacketInfo {
+                fivetuple: FiveTuple {
+                    src: source,
+                    dst: destination,
+                    src_port,
+                    dst_port,
+                    protocol: IpNextHeaderProtocols::Tcp.to_primitive_values().0,
+                },
+                ip_payload_length: ip_payload_length,
+                dns_response: None,
             })
         }
         None => {
@@ -234,10 +260,10 @@ mod tests {
         let result = parse_ethernet(packet, &log).unwrap();
         let expected_src: std::net::IpAddr = "2600:1702:f80:97b0::24".parse().unwrap();
         let expected_dst: std::net::IpAddr = "2a04:4e42:400::67".parse().unwrap();
-        assert_eq!(result.dst_port, 443);
-        assert_eq!(result.src_port, 50596);
-        assert_eq!(result.src, expected_src);
-        assert_eq!(result.dst, expected_dst);
+        assert_eq!(result.fivetuple.dst_port, 443);
+        assert_eq!(result.fivetuple.src_port, 50596);
+        assert_eq!(result.fivetuple.src, expected_src);
+        assert_eq!(result.fivetuple.dst, expected_dst);
     }
 
     #[test]
@@ -246,6 +272,6 @@ mod tests {
         let packet_bytes = decode_hex(TEST_IPV4_PACKET).unwrap();
         let packet = EthernetPacketKind::new(&packet_bytes).unwrap();
         let result = parse_ethernet(packet, &log).unwrap();
-        assert_eq!(result.dst_port, 443);
+        assert_eq!(result.fivetuple.dst_port, 443);
     }
 }

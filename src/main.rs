@@ -99,13 +99,11 @@ async fn handle_packet<'a>(packet: bytes::Bytes, user_agg_channel: tokio::sync::
         packet_parser::EthernetPacketKind::new(&packet).unwrap(),
         &log,
     ) {
-        Ok(fivetuple) => {
-            // ToDo(matt9j) This overcounts the L2 and IP header. Specifically want to measure IP payload.
-            let packet_length = packet.len() as u64;
-            user_agg_channel.send(async_aggregator::Message::Report{id: fivetuple.src, amount: packet_length}).await.unwrap_or_else(
+        Ok(packet_info) => {
+            user_agg_channel.send(async_aggregator::Message::Report{id: packet_info.fivetuple.src, amount: packet_info.ip_payload_length as u64}).await.unwrap_or_else(
                 |e| slog::error!(log, "Failed to send to dispatcher"; "error" => e.to_string())
             );
-            slog::debug!(log, "Received fivetuple {:?}", fivetuple);
+            slog::debug!(log, "Received packet info {:?}", packet_info);
         }
         Err(e) => match e {
             packet_parser::PacketParseError::IsArp => {
