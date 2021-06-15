@@ -18,8 +18,6 @@ pub struct FiveTuple {
     pub protocol: u8,
 }
 
-pub type EthernetPacketKind<'a> = pnet_packet::ethernet::EthernetPacket<'a>;
-
 #[derive(Error, Debug)]
 pub enum PacketParseError {
     #[error("Packet unable to parse, possibly corrupted")]
@@ -31,12 +29,13 @@ pub enum PacketParseError {
 }
 
 pub fn parse_ethernet(
-    ethernet: EthernetPacket,
+    packet: bytes::Bytes,
     logger: &slog::Logger,
 ) -> Result<PacketInfo, PacketParseError> {
+    let ethernet = pnet_packet::ethernet::EthernetPacket::new(&packet).ok_or(PacketParseError::BadPacket)?;
     match ethernet.get_ethertype() {
-        EtherTypes::Ipv4 => parse_ipv4(&ethernet, logger),
-        EtherTypes::Ipv6 => parse_ipv6(&ethernet, logger),
+        EtherTypes::Ipv4 => parse_ipv4(ethernet, logger),
+        EtherTypes::Ipv6 => parse_ipv6(ethernet, logger),
         EtherTypes::Arp => Err(PacketParseError::IsArp),
         _ => {
             slog::info!(
@@ -62,8 +61,8 @@ use pnet_packet::udp::UdpPacket;
 use pnet_packet::Packet;
 use pnet_packet::{PacketSize, PrimitiveValues};
 
-fn parse_ipv4(
-    ethernet: &EthernetPacket,
+fn parse_ipv4 (
+    ethernet: EthernetPacket,
     logger: &slog::Logger,
 ) -> Result<PacketInfo, PacketParseError> {
     match Ipv4Packet::new(ethernet.payload()) {
@@ -104,8 +103,8 @@ fn create_unknown_transport_fivetuple(
     }
 }
 
-fn parse_ipv6(
-    ethernet: &EthernetPacket,
+fn parse_ipv6 (
+    ethernet: EthernetPacket,
     logger: &slog::Logger,
 ) -> Result<PacketInfo, PacketParseError> {
     match Ipv6Packet::new(ethernet.payload()) {
@@ -234,12 +233,12 @@ fn parse_transport_tcp(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_ethernet, EthernetPacketKind};
+    use super::parse_ethernet;
 
     const TEST_IPV4_PACKET: &str = "14c03e83666fe4a47133c971080045000235e844400040061e9e0a000080b9c76d99b63001bbaf5d3bd0d3c31b4b801801f6948700000101080a3b098b4aec67f47616030101fc010001f80303a9a47cf7f55f7386da68128b9da84d8565dc071f965ce761d2230796a9bc620a2003a7231a0f6ee16741a9bb46e38bd85dc29ea5c45ab69dfed0f3fa9039f557610024130113031302c02bc02fcca9cca8c02cc030c00ac009c013c014009c009d002f0035000a0100018b0000000f000d00000a6d617474396a2e6e657400170000ff01000100000a000e000c001d00170018001901000101000b00020100002300000010000e000c02683208687474702f312e310005000501000000000033006b0069001d0020866a8ea435a8ea303dddba9875cec5723f88415b1b0ba8129976e1dac7f9a46500170041047355eede7258e545dd2dc5cce6b7b635d3df79f4061ecbbbedff9eb2eaf2927fbdc89914f349c7f27638e29a7984f5075634aab7cb0c08790f861d64ad316e3d002b00050403040303000d0018001604030503060308040805080604010501060102030201002d00020101001c000240010015009400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
     const TEST_IPV6_PACKET: &str = "145bd1af5dc0e4a47133c97186dd60004fe702250640260017020f8097b000000000000000242a044e42040000000000000000000067c5a401bb5c07ea85f13e4b9c801801fbc63e00000101080a8d33f62c849849241603010200010001fc030331638499a07df01440c31689c1aa4701e3478405716c48ce3125e77bc2e406a2208bee720bab28182c6c2f45ce8f39808164ab2f34a5115927587d64dfa1858b2d0024130113031302c02bc02fcca9cca8c02cc030c00ac009c013c014009c009d002f0035000a0100018f0000000d000b000008786b63642e636f6d00170000ff01000100000a000e000c001d00170018001901000101000b00020100002300000010000e000c02683208687474702f312e310005000501000000000033006b0069001d0020a2880dc8967058e95ab9dd1b084987f6554f3a9cc23c67db918b67f770cdac3c0017004104b02f928f211882dbb0503634a3459b81e9c4c9e094a1e4ad868faf9a505a33d0b60e3933aba6682c6308ee344c805a6e45cd7ca19be97f3efd7204727681c031002b00050403040303000d0018001604030503060308040805080604010501060102030201002d00020101001c000240010015009a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
-    fn decode_hex(input: &str) -> Result<Vec<u8>, std::num::ParseIntError> {
+    fn decode_hex(input: &str) -> Result<bytes::Bytes, std::num::ParseIntError> {
         (0..input.len()).step_by(2).map(|chunk_i| u8::from_str_radix(&input[chunk_i..chunk_i+2], 16)).collect()
     }
 
@@ -256,8 +255,7 @@ mod tests {
     fn test_parse_ipv6() {
         let log = make_logger();
         let packet_bytes = decode_hex(TEST_IPV6_PACKET).unwrap();
-        let packet = EthernetPacketKind::new(&packet_bytes).unwrap();
-        let result = parse_ethernet(packet, &log).unwrap();
+        let result = parse_ethernet(packet_bytes, &log).unwrap();
         let expected_src: std::net::IpAddr = "2600:1702:f80:97b0::24".parse().unwrap();
         let expected_dst: std::net::IpAddr = "2a04:4e42:400::67".parse().unwrap();
         assert_eq!(result.fivetuple.dst_port, 443);
@@ -270,8 +268,7 @@ mod tests {
     fn test_parse_ipv4() {
         let log = make_logger();
         let packet_bytes = decode_hex(TEST_IPV4_PACKET).unwrap();
-        let packet = EthernetPacketKind::new(&packet_bytes).unwrap();
-        let result = parse_ethernet(packet, &log).unwrap();
+        let result = parse_ethernet(packet_bytes, &log).unwrap();
         assert_eq!(result.fivetuple.dst_port, 443);
     }
 }

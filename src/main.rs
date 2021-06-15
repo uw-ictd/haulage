@@ -95,10 +95,7 @@ async fn main() {
 }
 
 async fn handle_packet<'a>(packet: bytes::Bytes, user_agg_channel: tokio::sync::mpsc::Sender<async_aggregator::Message>, log: Logger) -> () {
-    match packet_parser::parse_ethernet(
-        packet_parser::EthernetPacketKind::new(&packet).unwrap(),
-        &log,
-    ) {
+    match packet_parser::parse_ethernet(packet, &log) {
         Ok(packet_info) => {
             user_agg_channel.send(async_aggregator::Message::Report{id: packet_info.fivetuple.src, amount: packet_info.ip_payload_length as u64}).await.unwrap_or_else(
                 |e| slog::error!(log, "Failed to send to dispatcher"; "error" => e.to_string())
