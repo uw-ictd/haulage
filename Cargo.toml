@@ -13,6 +13,8 @@ anyhow = "1.0.34"
 bytes = "1.0.1"
 domain = { version = "0.6.1", features = ["bytes"] }
 git-version = "0.3.4"
+humantime = "2.1.0"
+humantime-serde = "1.0.1"
 pnet_packet = "0.27.2"
 pnet_datalink = "0.27.2"
 serde = { version="1.0.126", features = ["derive"] }

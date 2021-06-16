@@ -27,8 +27,10 @@ pub struct Version {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all="camelCase")]
 pub struct V1 {
-    pub flow_log_interval: String,
-    pub user_log_interval: String,
+    #[serde(with = "humantime_serde")]
+    pub flow_log_interval: std::time::Duration,
+    #[serde(with = "humantime_serde")]
+    pub user_log_interval: std::time::Duration,
     pub interface: String,
     pub user_subnet: String,
     pub ignored_user_addresses: Vec<String>,
@@ -38,7 +40,8 @@ pub struct V1 {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all="camelCase")]
 pub struct V1Custom {
-    pub reenable_poll_interval: String,
+    #[serde(with = "humantime_serde")]
+    pub reenable_poll_interval: std::time::Duration,
     pub db_location: String,
     pub db_user: String,
     pub db_pass: String,
@@ -51,8 +54,8 @@ pub struct Internal {
     pub db_location: String,
     pub db_user: String,
     pub db_pass: String,
-    pub flow_log_interval: String,
-    pub user_log_interval: String,
+    pub flow_log_interval: std::time::Duration,
+    pub user_log_interval: std::time::Duration,
     pub interface: String,
     pub user_subnet: String,
     pub ignored_user_addresses: Vec<String>,
