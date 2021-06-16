@@ -17,6 +17,49 @@ struct Opt {
     verbose: bool,
 }
 
+mod config {
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct Version {
+    pub version: Option<i16>
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct V1 {
+    pub flow_log_interval: String,
+    pub user_log_interval: String,
+    pub interface: String,
+    pub user_subnet: String,
+    pub ignored_user_addresses: Vec<String>,
+    pub custom: V1Custom,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct V1Custom {
+    pub reenable_poll_interval: String,
+    pub db_location: String,
+    pub db_user: String,
+    pub db_pass: String,
+}
+
+// An internal configuration structure used by the rest of the program that can
+// be updated without breaking compatibility with existing configuration files.
+#[derive(Debug)]
+pub struct Internal {
+    pub db_location: String,
+    pub db_user: String,
+    pub db_pass: String,
+    pub flow_log_interval: String,
+    pub user_log_interval: String,
+    pub interface: String,
+    pub user_subnet: String,
+    pub ignored_user_addresses: Vec<String>,
+}
+
+}
+
 #[tokio::main]
 async fn main() {
     // Find and store build version information
@@ -49,15 +92,40 @@ async fn main() {
 
     slog::info!(root_log, "Arguments {:?}", opt);
 
+    // Read the configuration file
+    let config_string = std::fs::read_to_string(opt.config).expect("Failed to read config file");
+    let parsed_config_version: config::Version = serde_yaml::from_str(&config_string).expect("Failed to extract version from config file");
+    slog::debug!(root_log, "Parsed the config version {:?}", parsed_config_version);
+    let config_version = parsed_config_version.version.unwrap_or(1);
+
+    let config = match config_version {
+        1 => {
+            let parsed_config: config::V1 = serde_yaml::from_str(&config_string).expect("Failed to parse config");
+            slog::debug!(root_log, "Parsed config {:?}", parsed_config);
+            config::Internal {
+                db_location: parsed_config.custom.db_location,
+                db_user: parsed_config.custom.db_user,
+                db_pass: parsed_config.custom.db_pass,
+                flow_log_interval: parsed_config.flow_log_interval,
+                user_log_interval: parsed_config.user_log_interval,
+                interface: parsed_config.interface,
+                user_subnet: parsed_config.user_subnet,
+                ignored_user_addresses: parsed_config.ignored_user_addresses,
+            }
+        }
+        _ => {
+            slog::error!(root_log, "Unsupported configuration version '{}' specified", config_version);
+            panic!("Unsupported configuration version specified");
+        }
+    };
+
     // Create the main user aggregator
     let user_aggregator = async_aggregator::AsyncAggregator::new(root_log.new(o!("aggregator" => "user")));
     println!("user_aggreagator {:?}", user_aggregator);
 
-    let interface_name: &str = "wlp1s0";
-
     // This is a lambda closure to do a match in the filter function! Cool...
     let interface_name_match =
-        |iface: &pnet_datalink::NetworkInterface| iface.name == interface_name;
+        |iface: &pnet_datalink::NetworkInterface| iface.name == config.interface;
 
     let interface = pnet_datalink::interfaces()
         .into_iter()

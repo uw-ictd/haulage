@@ -15,6 +15,8 @@ domain = { version = "0.6.1", features = ["bytes"] }
 git-version = "0.3.4"
 pnet_packet = "0.27.2"
 pnet_datalink = "0.27.2"
+serde = { version="1.0.126", features = ["derive"] }
+serde_yaml = "0.8.7"
 slog = "2.5.2"
 slog-async = "2.4.0"
 slog-atomic = "3.0.0"
