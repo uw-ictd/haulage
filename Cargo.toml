@@ -26,4 +26,4 @@ slog-journald = "2.1.1"
 slog-term = "2.5.0"
 structopt = "0.3.21"
 thiserror = "1.0.22"
-tokio = { version = "^1.5.0", features = ["full"] }
+tokio = { version = "^1.5.0", features = ["rt-multi-thread", "time", "sync", "macros"] }

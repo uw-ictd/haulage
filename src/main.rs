@@ -123,8 +123,7 @@ async fn main() {
     };
 
     // Create the main user aggregator
-    let user_aggregator = async_aggregator::AsyncAggregator::new(root_log.new(o!("aggregator" => "user")));
-    println!("user_aggreagator {:?}", user_aggregator);
+    let user_aggregator = async_aggregator::AsyncAggregator::new(config.user_log_interval, root_log.new(o!("aggregator" => "user")));
 
     // This is a lambda closure to do a match in the filter function! Cool...
     let interface_name_match =

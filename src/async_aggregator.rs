@@ -6,11 +6,10 @@ pub struct AsyncAggregator {
     dispatch_channel: tokio::sync::mpsc::Sender<Message>,
 }
 impl AsyncAggregator {
-    pub fn new(log: slog::Logger) -> AsyncAggregator {
-        println!("made an aggregator");
+    pub fn new(period: std::time::Duration, log: slog::Logger) -> AsyncAggregator {
         let (sender, receiver) = tokio::sync::mpsc::channel(64);
         let dispatch_handle = tokio::task::spawn(async move {
-            aggregate_dispatcher(receiver, log).await;
+            aggregate_dispatcher(receiver, period, log).await;
         });
         AsyncAggregator {
             dispatch_handle: dispatch_handle,
@@ -26,7 +25,7 @@ pub enum Message {
     Report {id: std::net::IpAddr, amount: u64}
 }
 
-async fn aggregate_dispatcher(mut chan: tokio::sync::mpsc::Receiver<Message>, log: slog::Logger) -> () {
+async fn aggregate_dispatcher(mut chan: tokio::sync::mpsc::Receiver<Message>, period: std::time::Duration, log: slog::Logger) -> () {
     let mut directory: HashMap<std::net::IpAddr, tokio::sync::mpsc::Sender<WorkerMessage>> = HashMap::new();
 
     while let Some(message) = chan.recv().await {
@@ -37,7 +36,7 @@ async fn aggregate_dispatcher(mut chan: tokio::sync::mpsc::Receiver<Message>, lo
                     let worker_log = log.new(slog::o!("aggregation" => String::from(format!("{:?}", dest))));
                     directory.insert(dest.clone(), worker_chan_send);
                     tokio::task::spawn(async move {
-                        aggregate_worker(dest.clone(), worker_chan_recv, worker_log).await;
+                        aggregate_worker(dest.clone(), worker_chan_recv, period, worker_log).await;
                     });
                 }
                 directory.get(&dest).unwrap().send(WorkerMessage::Report{amount: amount}).await.unwrap_or_else(|e|
@@ -49,26 +48,35 @@ async fn aggregate_dispatcher(mut chan: tokio::sync::mpsc::Receiver<Message>, lo
     }
 }
 
+#[derive(Debug)]
 enum WorkerMessage {
     Report {amount: u64},
     _GetTotal {out_channel: tokio::sync::oneshot::Sender<u64>},
 }
 
-async fn aggregate_worker(id: std::net::IpAddr, mut chan: tokio::sync::mpsc::Receiver<WorkerMessage>, log: slog::Logger) -> () {
+async fn aggregate_worker(id: std::net::IpAddr, mut chan: tokio::sync::mpsc::Receiver<WorkerMessage>, period: std::time::Duration, log: slog::Logger) -> () {
     let mut bytes_aggregated: u64 = 0;
-    while let Some(message) = chan.recv().await {
-        match message {
-            WorkerMessage::Report{amount} => {
-                bytes_aggregated += amount;
-                slog::debug!(log, "Aggregated {} bytes", bytes_aggregated);
+    let mut timer = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    loop {
+        tokio::select! {
+            timeout = timer.tick() => println!("Timer ticked"),
+            message = chan.recv() => {
+                if message.is_none() {
+                    break;
+                }
+                match message.unwrap() {
+                    WorkerMessage::Report{amount} => {
+                        bytes_aggregated += amount;
+                        slog::debug!(log, "Aggregated {} bytes", bytes_aggregated);
+                    }
+                    WorkerMessage::_GetTotal{out_channel} => {
+                        // ToDo(matt9j) This might panic during shutdown, if there is a
+                        // get request in flight as the dispatcher shuts down?
+                        out_channel.send(bytes_aggregated).expect("Failed to send oneshot return");
+                    }
+                }
             }
-            WorkerMessage::_GetTotal{out_channel} => {
-                // ToDo(matt9j) This might panic during shutdown, if there is a
-                // get request in flight as the dispatcher shuts down?
-                out_channel.send(bytes_aggregated).expect("Failed to send oneshot return");
-            }
-        }
-
+        };
     }
     slog::debug!(log, "Shutting down worker {}", id);
 }
