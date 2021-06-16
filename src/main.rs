@@ -13,7 +13,7 @@ struct Opt {
     config: std::path::PathBuf,
 
     /// Show debug log information
-    #[structopt(short = "v", long = "verebose")]
+    #[structopt(short = "v", long = "verbose")]
     verbose: bool,
 }
 
