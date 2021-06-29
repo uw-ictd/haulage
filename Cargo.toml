@@ -24,6 +24,7 @@ slog-async = "2.4.0"
 slog-atomic = "3.0.0"
 slog-journald = "2.1.1"
 slog-term = "2.5.0"
+sqlx = { version = "0.5.5", features = [ "runtime-tokio-rustls", "postgres", "chrono" ] }
 structopt = "0.3.21"
 thiserror = "1.0.22"
 tokio = { version = "^1.5.0", features = ["rt-multi-thread", "time", "sync", "macros"] }
