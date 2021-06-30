@@ -22,9 +22,7 @@ pub struct UserReporter {
 }
 impl UserReporter {
     pub fn new(pool: Arc<sqlx::PgPool>) -> Self {
-        Self {
-            db_pool: pool,
-        }
+        Self { db_pool: pool }
     }
 }
 
@@ -40,7 +38,9 @@ impl Reporter for UserReporter {
             WHERE static_ips.ip='10.45.0.2'
         "#;
 
-        let rows: Vec<SubscriberRow> = sqlx::query_as(current_state_query).fetch_all(&mut transaction).await?;
+        let rows: Vec<SubscriberRow> = sqlx::query_as(current_state_query)
+            .fetch_all(&mut transaction)
+            .await?;
 
         // Ensure the user is unique
         if rows.len() != 1 {
@@ -54,9 +54,14 @@ impl Reporter for UserReporter {
             INSERT INTO subscriber_history("subscriber", "time", "data_balance", "balance", "bridged")
             VALUES ($1, $2, $3, $4, $5)
         "#;
-        sqlx::query(update_history_query).bind(
-            &user_state.subscriber_id).bind(chrono::Utc::now()).bind(&new_data_balance).bind(&user_state.balance).bind(&user_state.bridged)
-        .execute(&mut transaction).await?;
+        sqlx::query(update_history_query)
+            .bind(&user_state.subscriber_id)
+            .bind(chrono::Utc::now())
+            .bind(&new_data_balance)
+            .bind(&user_state.balance)
+            .bind(&user_state.bridged)
+            .execute(&mut transaction)
+            .await?;
 
         let subscriber_update_query = r#"
             UPDATE subscribers
@@ -67,7 +72,8 @@ impl Reporter for UserReporter {
         sqlx::query(subscriber_update_query)
             .bind(&new_data_balance)
             .bind(&user_state.subscriber_id)
-            .execute(&mut transaction).await?;
+            .execute(&mut transaction)
+            .await?;
 
         transaction.commit().await?;
         Ok(())

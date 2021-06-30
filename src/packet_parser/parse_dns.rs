@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use domain::base::ToDname;
-use thiserror::Error;
 use std::net::IpAddr;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum DnsParseError {
@@ -21,7 +21,6 @@ pub struct DnsResponse {
     pub addresses: Vec<IpAddr>,
 }
 
-
 pub fn parse_dns_payload(
     packet: &[u8],
     logger: &slog::Logger,
@@ -34,8 +33,10 @@ pub fn parse_dns_payload(
 
     // Only handle the common case of a single question due to ambiguity in the
     // current IETF standard ca. 2021.
-    let question = parsed_message.first_question().ok_or(DnsParseError::ParseQuestionFailure)?;
-    slog::debug!{logger, "parsed a DNS question {:?}", question}
+    let question = parsed_message
+        .first_question()
+        .ok_or(DnsParseError::ParseQuestionFailure)?;
+    slog::debug! {logger, "parsed a DNS question {:?}", question}
     let query = question.qname();
 
     let mut current_canonical_name = query.clone();
@@ -45,7 +46,7 @@ pub fn parse_dns_payload(
     let mut answer_addresses: Vec<IpAddr> = Vec::with_capacity(10);
     for a in answer_section.limit_to_in::<domain::rdata::AllRecordData<_, _>>() {
         let answer = a?;
-        slog::debug!{logger, "parsed DNS answer {:?}", answer};
+        slog::debug! {logger, "parsed DNS answer {:?}", answer};
         if answer.owner().ne(&current_canonical_name) {
             continue;
         }
@@ -68,10 +69,9 @@ pub fn parse_dns_payload(
 
     return Ok(DnsResponse {
         fqdn: query.to_bytes(),
-        addresses: answer_addresses
+        addresses: answer_addresses,
     });
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -83,7 +83,10 @@ mod tests {
     const TEST_DNS_BROKEN_PAYLOAD: &str = "9af181800001000400000000046f637370";
 
     fn decode_hex(input: &str) -> Result<Vec<u8>, std::num::ParseIntError> {
-        (0..input.len()).step_by(2).map(|chunk_i| u8::from_str_radix(&input[chunk_i..chunk_i+2], 16)).collect()
+        (0..input.len())
+            .step_by(2)
+            .map(|chunk_i| u8::from_str_radix(&input[chunk_i..chunk_i + 2], 16))
+            .collect()
     }
 
     fn make_logger() -> slog::Logger {
@@ -106,7 +109,7 @@ mod tests {
                 "151.101.64.67".parse().unwrap(),
                 "151.101.128.67".parse().unwrap(),
                 "151.101.192.67".parse().unwrap(),
-            ]
+            ],
         };
         assert_eq!(parse_dns_payload(&data, &log).unwrap(), expected_result);
     }
@@ -122,7 +125,7 @@ mod tests {
                 "2a04:4e42:200::67".parse().unwrap(),
                 "2a04:4e42:400::67".parse().unwrap(),
                 "2a04:4e42:600::67".parse().unwrap(),
-            ]
+            ],
         };
         assert_eq!(parse_dns_payload(&data, &log).unwrap(), expected_result);
     }
@@ -136,7 +139,7 @@ mod tests {
             addresses: vec![
                 "104.18.21.226".parse().unwrap(),
                 "104.18.20.226".parse().unwrap(),
-            ]
+            ],
         };
         assert_eq!(parse_dns_payload(&data, &log).unwrap(), expected_result);
     }
@@ -146,7 +149,8 @@ mod tests {
         let log = make_logger();
         let data = decode_hex(TEST_DNS_BROKEN_PAYLOAD).unwrap();
         let result = parse_dns_payload(&data, &log).unwrap_err().to_string();
-        let expected_error: Result<DnsResponse, DnsParseError> = Err(DnsParseError::ParseQuestionFailure);
+        let expected_error: Result<DnsResponse, DnsParseError> =
+            Err(DnsParseError::ParseQuestionFailure);
         assert_eq!(result, expected_error.unwrap_err().to_string());
     }
 }

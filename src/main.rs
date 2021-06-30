@@ -1,7 +1,7 @@
 use git_version::git_version;
 use reporter::UserReporter;
-use sqlx::prelude::*;
 use slog::*;
+use sqlx::prelude::*;
 use structopt::StructOpt;
 
 mod async_aggregator;
@@ -12,7 +12,11 @@ mod reporter;
 #[structopt(name = "haulage", about = "A small-scale traffic monitor.")]
 struct Opt {
     /// The path of the configuration file.
-    #[structopt(short = "c", long = "config", default_value = "/etc/haulage/config.yml")]
+    #[structopt(
+        short = "c",
+        long = "config",
+        default_value = "/etc/haulage/config.yml"
+    )]
     config: std::path::PathBuf,
 
     /// Show debug log information
@@ -21,49 +25,48 @@ struct Opt {
 }
 
 mod config {
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all="camelCase")]
-pub struct Version {
-    pub version: Option<i16>
-}
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Version {
+        pub version: Option<i16>,
+    }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all="camelCase")]
-pub struct V1 {
-    #[serde(with = "humantime_serde")]
-    pub flow_log_interval: std::time::Duration,
-    #[serde(with = "humantime_serde")]
-    pub user_log_interval: std::time::Duration,
-    pub interface: String,
-    pub user_subnet: String,
-    pub ignored_user_addresses: Vec<String>,
-    pub custom: V1Custom,
-}
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct V1 {
+        #[serde(with = "humantime_serde")]
+        pub flow_log_interval: std::time::Duration,
+        #[serde(with = "humantime_serde")]
+        pub user_log_interval: std::time::Duration,
+        pub interface: String,
+        pub user_subnet: String,
+        pub ignored_user_addresses: Vec<String>,
+        pub custom: V1Custom,
+    }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all="camelCase")]
-pub struct V1Custom {
-    #[serde(with = "humantime_serde")]
-    pub reenable_poll_interval: std::time::Duration,
-    pub db_location: String,
-    pub db_user: String,
-    pub db_pass: String,
-}
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct V1Custom {
+        #[serde(with = "humantime_serde")]
+        pub reenable_poll_interval: std::time::Duration,
+        pub db_location: String,
+        pub db_user: String,
+        pub db_pass: String,
+    }
 
-// An internal configuration structure used by the rest of the program that can
-// be updated without breaking compatibility with existing configuration files.
-#[derive(Debug)]
-pub struct Internal {
-    pub db_name: String,
-    pub db_user: String,
-    pub db_pass: String,
-    pub flow_log_interval: std::time::Duration,
-    pub user_log_interval: std::time::Duration,
-    pub interface: String,
-    pub user_subnet: String,
-    pub ignored_user_addresses: Vec<String>,
-}
-
+    // An internal configuration structure used by the rest of the program that can
+    // be updated without breaking compatibility with existing configuration files.
+    #[derive(Debug)]
+    pub struct Internal {
+        pub db_name: String,
+        pub db_user: String,
+        pub db_pass: String,
+        pub flow_log_interval: std::time::Duration,
+        pub user_log_interval: std::time::Duration,
+        pub interface: String,
+        pub user_subnet: String,
+        pub ignored_user_addresses: Vec<String>,
+    }
 }
 
 #[tokio::main]
@@ -100,13 +103,19 @@ async fn main() {
 
     // Read the configuration file
     let config_string = std::fs::read_to_string(opt.config).expect("Failed to read config file");
-    let parsed_config_version: config::Version = serde_yaml::from_str(&config_string).expect("Failed to extract version from config file");
-    slog::debug!(root_log, "Parsed the config version {:?}", parsed_config_version);
+    let parsed_config_version: config::Version =
+        serde_yaml::from_str(&config_string).expect("Failed to extract version from config file");
+    slog::debug!(
+        root_log,
+        "Parsed the config version {:?}",
+        parsed_config_version
+    );
     let config_version = parsed_config_version.version.unwrap_or(1);
 
     let config = match config_version {
         1 => {
-            let parsed_config: config::V1 = serde_yaml::from_str(&config_string).expect("Failed to parse config");
+            let parsed_config: config::V1 =
+                serde_yaml::from_str(&config_string).expect("Failed to parse config");
             slog::debug!(root_log, "Parsed config {:?}", parsed_config);
             config::Internal {
                 db_name: parsed_config.custom.db_location,
@@ -120,31 +129,53 @@ async fn main() {
             }
         }
         _ => {
-            slog::error!(root_log, "Unsupported configuration version '{}' specified", config_version);
+            slog::error!(
+                root_log,
+                "Unsupported configuration version '{}' specified",
+                config_version
+            );
             panic!("Unsupported configuration version specified");
         }
     };
 
     // Connect to backing storage database
-    let db_string = format!("postgres://{}:{}@localhost/{}", config.db_user, config.db_pass, config.db_name);
+    let db_string = format!(
+        "postgres://{}:{}@localhost/{}",
+        config.db_user, config.db_pass, config.db_name
+    );
 
     // TODO(matt9j) Temporary workaround to set all transactions to serializable
     // until sqlx supports per-transaction isolation settings.
     let db_pool = sqlx::postgres::PgPoolOptions::new()
-        .after_connect(|conn| Box::pin(async move {
-            conn.execute("SET default_transaction_isolation TO 'serializable'").await?;
-            Ok(())
-        }))
+        .after_connect(|conn| {
+            Box::pin(async move {
+                conn.execute("SET default_transaction_isolation TO 'serializable'")
+                    .await?;
+                Ok(())
+            })
+        })
         .connect(&db_string);
 
-    let db_pool = tokio::time::timeout(std::time::Duration::from_secs(5), db_pool).await.expect("DB connection timed out").unwrap();
-    slog::info!(root_log, "Connected to database db={} user={}", config.db_name, config.db_user);
+    let db_pool = tokio::time::timeout(std::time::Duration::from_secs(5), db_pool)
+        .await
+        .expect("DB connection timed out")
+        .unwrap();
+    slog::info!(
+        root_log,
+        "Connected to database db={} user={}",
+        config.db_name,
+        config.db_user
+    );
     let db_pool = std::sync::Arc::new(db_pool);
 
     let local_reporter = UserReporter::new(db_pool.clone());
 
     // Create the main user aggregator
-    let user_aggregator = async_aggregator::AsyncAggregator::new(config.user_log_interval, local_reporter, root_log.new(o!("aggregator" => "user")));
+    let user_aggregator = async_aggregator::AsyncAggregator::new(
+        config.user_log_interval,
+        local_reporter,
+        root_log.new(o!("aggregator" => "user")),
+    );
 
     // This is a lambda closure to do a match in the filter function! Cool...
     let interface_name_match =
@@ -172,7 +203,7 @@ async fn main() {
         match rx.next() {
             Ok(packet) => {
                 let packet_data_copy = bytes::Bytes::copy_from_slice(packet);
-                let packet_log =interface_log.new(o!());
+                let packet_log = interface_log.new(o!());
                 let channel = user_aggregator.clone_input_channel();
                 tokio::task::spawn(async move {
                     handle_packet(packet_data_copy, channel, packet_log).await;
@@ -185,12 +216,22 @@ async fn main() {
     }
 }
 
-async fn handle_packet<'a>(packet: bytes::Bytes, user_agg_channel: tokio::sync::mpsc::Sender<async_aggregator::Message>, log: Logger) -> () {
+async fn handle_packet<'a>(
+    packet: bytes::Bytes,
+    user_agg_channel: tokio::sync::mpsc::Sender<async_aggregator::Message>,
+    log: Logger,
+) -> () {
     match packet_parser::parse_ethernet(packet, &log) {
         Ok(packet_info) => {
-            user_agg_channel.send(async_aggregator::Message::Report{id: packet_info.fivetuple.src, amount: packet_info.ip_payload_length as u64}).await.unwrap_or_else(
-                |e| slog::error!(log, "Failed to send to dispatcher"; "error" => e.to_string())
-            );
+            user_agg_channel
+                .send(async_aggregator::Message::Report {
+                    id: packet_info.fivetuple.src,
+                    amount: packet_info.ip_payload_length as u64,
+                })
+                .await
+                .unwrap_or_else(
+                    |e| slog::error!(log, "Failed to send to dispatcher"; "error" => e.to_string()),
+                );
             slog::debug!(log, "Received packet info {:?}", packet_info);
         }
         Err(e) => match e {
