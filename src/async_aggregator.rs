@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use crate::reporter::Reporter;
 
 #[derive(Debug)]
 pub struct AsyncAggregator {
@@ -6,10 +7,12 @@ pub struct AsyncAggregator {
     dispatch_channel: tokio::sync::mpsc::Sender<Message>,
 }
 impl AsyncAggregator {
-    pub fn new(period: std::time::Duration, log: slog::Logger) -> AsyncAggregator {
+    pub fn new<T>(period: std::time::Duration, reporter: T, log: slog::Logger) -> AsyncAggregator
+        where T: Reporter + Send + Sync + Clone + 'static
+    {
         let (sender, receiver) = tokio::sync::mpsc::channel(64);
         let dispatch_handle = tokio::task::spawn(async move {
-            aggregate_dispatcher(receiver, period, log).await;
+            aggregate_dispatcher(receiver, period, reporter, log).await;
         });
         AsyncAggregator {
             dispatch_handle: dispatch_handle,
@@ -25,7 +28,9 @@ pub enum Message {
     Report {id: std::net::IpAddr, amount: u64}
 }
 
-async fn aggregate_dispatcher(mut chan: tokio::sync::mpsc::Receiver<Message>, period: std::time::Duration, log: slog::Logger) -> () {
+async fn aggregate_dispatcher<T>(mut chan: tokio::sync::mpsc::Receiver<Message>, period: std::time::Duration, reporter: T, log: slog::Logger) -> ()
+    where T: Reporter + Send + Sync + Clone + 'static
+{
     let mut directory: HashMap<std::net::IpAddr, tokio::sync::mpsc::Sender<WorkerMessage>> = HashMap::new();
 
     while let Some(message) = chan.recv().await {
@@ -34,9 +39,11 @@ async fn aggregate_dispatcher(mut chan: tokio::sync::mpsc::Receiver<Message>, pe
                 if !directory.contains_key(&dest) {
                     let (worker_chan_send, worker_chan_recv) = tokio::sync::mpsc::channel(32);
                     let worker_log = log.new(slog::o!("aggregation" => String::from(format!("{:?}", dest))));
+
+                    let new_reporter = reporter.clone();
                     directory.insert(dest.clone(), worker_chan_send);
                     tokio::task::spawn(async move {
-                        aggregate_worker(dest.clone(), worker_chan_recv, period, worker_log).await;
+                        aggregate_worker(dest, worker_chan_recv, period, new_reporter, worker_log).await;
                     });
                 }
                 directory.get(&dest).unwrap().send(WorkerMessage::Report{amount: amount}).await.unwrap_or_else(|e|
@@ -54,12 +61,22 @@ enum WorkerMessage {
     _GetTotal {out_channel: tokio::sync::oneshot::Sender<u64>},
 }
 
-async fn aggregate_worker(id: std::net::IpAddr, mut chan: tokio::sync::mpsc::Receiver<WorkerMessage>, period: std::time::Duration, log: slog::Logger) -> () {
+async fn aggregate_worker<T>(id: std::net::IpAddr, mut chan: tokio::sync::mpsc::Receiver<WorkerMessage>, period: std::time::Duration, reporter: T, log: slog::Logger) -> ()
+    where T: Reporter + Send + Sync + Clone + 'static
+{
     let mut bytes_aggregated: u64 = 0;
     let mut timer = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
     loop {
         tokio::select! {
-            timeout = timer.tick() => println!("Timer ticked"),
+            _ = timer.tick() => {
+                let result = reporter.report(bytes_aggregated).await;
+                match result {
+                    Ok(_) => {},
+                    Err(e) => {
+                        slog::warn!(log, "Failed to write out report for {} with error {}", id, e);
+                    }
+                }
+            }
             message = chan.recv() => {
                 if message.is_none() {
                     break;

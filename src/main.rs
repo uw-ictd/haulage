@@ -1,9 +1,12 @@
 use git_version::git_version;
+use reporter::UserReporter;
+use sqlx::prelude::*;
 use slog::*;
 use structopt::StructOpt;
 
 mod async_aggregator;
 mod packet_parser;
+mod reporter;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "haulage", about = "A small-scale traffic monitor.")]
@@ -51,7 +54,7 @@ pub struct V1Custom {
 // be updated without breaking compatibility with existing configuration files.
 #[derive(Debug)]
 pub struct Internal {
-    pub db_location: String,
+    pub db_name: String,
     pub db_user: String,
     pub db_pass: String,
     pub flow_log_interval: std::time::Duration,
@@ -106,7 +109,7 @@ async fn main() {
             let parsed_config: config::V1 = serde_yaml::from_str(&config_string).expect("Failed to parse config");
             slog::debug!(root_log, "Parsed config {:?}", parsed_config);
             config::Internal {
-                db_location: parsed_config.custom.db_location,
+                db_name: parsed_config.custom.db_location,
                 db_user: parsed_config.custom.db_user,
                 db_pass: parsed_config.custom.db_pass,
                 flow_log_interval: parsed_config.flow_log_interval,
@@ -122,8 +125,26 @@ async fn main() {
         }
     };
 
+    // Connect to backing storage database
+    let db_string = format!("postgres://{}:{}@localhost/{}", config.db_user, config.db_pass, config.db_name);
+
+    // TODO(matt9j) Temporary workaround to set all transactions to serializable
+    // until sqlx supports per-transaction isolation settings.
+    let db_pool = sqlx::postgres::PgPoolOptions::new()
+        .after_connect(|conn| Box::pin(async move {
+            conn.execute("SET default_transaction_isolation TO 'serializable'").await?;
+            Ok(())
+        }))
+        .connect(&db_string);
+
+    let db_pool = tokio::time::timeout(std::time::Duration::from_secs(5), db_pool).await.expect("DB connection timed out").unwrap();
+    slog::info!(root_log, "Connected to database db={} user={}", config.db_name, config.db_user);
+    let db_pool = std::sync::Arc::new(db_pool);
+
+    let local_reporter = UserReporter::new(db_pool.clone());
+
     // Create the main user aggregator
-    let user_aggregator = async_aggregator::AsyncAggregator::new(config.user_log_interval, root_log.new(o!("aggregator" => "user")));
+    let user_aggregator = async_aggregator::AsyncAggregator::new(config.user_log_interval, local_reporter, root_log.new(o!("aggregator" => "user")));
 
     // This is a lambda closure to do a match in the filter function! Cool...
     let interface_name_match =
