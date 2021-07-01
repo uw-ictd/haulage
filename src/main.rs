@@ -1,3 +1,7 @@
+use std::collections::HashSet;
+use std::iter::FromIterator;
+use std::str::FromStr;
+
 use git_version::git_version;
 use reporter::UserReporter;
 use slog::*;
@@ -64,8 +68,8 @@ mod config {
         pub flow_log_interval: std::time::Duration,
         pub user_log_interval: std::time::Duration,
         pub interface: String,
-        pub user_subnet: String,
-        pub ignored_user_addresses: Vec<String>,
+        pub user_subnet: ipnetwork::IpNetwork,
+        pub ignored_user_addresses: std::collections::HashSet<std::net::IpAddr>,
     }
 }
 
@@ -124,8 +128,12 @@ async fn main() {
                 flow_log_interval: parsed_config.flow_log_interval,
                 user_log_interval: parsed_config.user_log_interval,
                 interface: parsed_config.interface,
-                user_subnet: parsed_config.user_subnet,
-                ignored_user_addresses: parsed_config.ignored_user_addresses,
+                user_subnet: ipnetwork::IpNetwork::from_str(&parsed_config.user_subnet).unwrap(),
+                ignored_user_addresses: HashSet::from_iter(
+                    parsed_config.ignored_user_addresses.iter().map(|a| {
+                        std::net::IpAddr::from_str(a).expect("Failed to parse configued IP address")
+                    }),
+                ),
             }
         }
         _ => {
@@ -137,6 +145,8 @@ async fn main() {
             panic!("Unsupported configuration version specified");
         }
     };
+
+    let config = std::sync::Arc::new(config);
 
     // Connect to backing storage database
     let db_string = format!(
@@ -203,8 +213,9 @@ async fn main() {
                 let packet_data_copy = bytes::Bytes::copy_from_slice(packet);
                 let packet_log = interface_log.new(o!());
                 let channel = user_aggregator.clone_input_channel();
+                let config = config.clone();
                 tokio::task::spawn(async move {
-                    handle_packet(packet_data_copy, channel, packet_log).await;
+                    handle_packet(packet_data_copy, channel, config, packet_log).await;
                 });
             }
             Err(e) => {
@@ -217,20 +228,56 @@ async fn main() {
 async fn handle_packet<'a>(
     packet: bytes::Bytes,
     user_agg_channel: tokio::sync::mpsc::Sender<async_aggregator::Message>,
+    config: std::sync::Arc<config::Internal>,
     log: Logger,
 ) -> () {
     match packet_parser::parse_ethernet(packet, &log) {
         Ok(packet_info) => {
-            user_agg_channel
-                .send(async_aggregator::Message::Report {
-                    id: packet_info.fivetuple.src,
-                    amount: packet_info.ip_payload_length as u64,
-                })
-                .await
-                .unwrap_or_else(
-                    |e| slog::error!(log, "Failed to send to dispatcher"; "error" => e.to_string()),
-                );
             slog::debug!(log, "Received packet info {:?}", packet_info);
+            let normalized_flow = normalize_address(
+                &packet_info.fivetuple,
+                packet_info.ip_payload_length as u64,
+                &config.user_subnet,
+                &config.ignored_user_addresses,
+            );
+            slog::debug!(log, "Normalized to {:?}", normalized_flow);
+
+            match normalized_flow {
+                NormalizedFlow::UserRemote(flow) => {
+                    user_agg_channel
+                        .send(async_aggregator::Message::Report {
+                            id: flow.user_addr,
+                            amount: flow.bytes_down + flow.bytes_up,
+                        })
+                        .await
+                        .unwrap_or_else(
+                            |e| slog::error!(log, "Failed to send to dispatcher"; "error" => e.to_string()),
+                        );
+                }
+                NormalizedFlow::UserUser(flow) => {
+                    user_agg_channel
+                        .send(async_aggregator::Message::Report {
+                            id: flow.a_addr,
+                            amount: flow.bytes_a_to_b + flow.bytes_b_to_a,
+                        })
+                        .await
+                        .unwrap_or_else(
+                            |e| slog::error!(log, "Failed to send to dispatcher"; "error" => e.to_string()),
+                        );
+                    user_agg_channel
+                        .send(async_aggregator::Message::Report {
+                            id: flow.b_addr,
+                            amount: flow.bytes_a_to_b + flow.bytes_b_to_a,
+                        })
+                        .await
+                        .unwrap_or_else(
+                            |e| slog::error!(log, "Failed to send to dispatcher"; "error" => e.to_string()),
+                        );
+                }
+                NormalizedFlow::Other(fivetuple, bytes) => {
+                    slog::info!(log, "Recevied unnormalizable flow"; "flow" => std::format!("{:?}", fivetuple), "size" => bytes);
+                }
+            }
         }
         Err(e) => match e {
             packet_parser::PacketParseError::IsArp => {
@@ -240,5 +287,98 @@ async fn handle_packet<'a>(
                 slog::debug! {log, "Some other error {}", e};
             }
         },
+    }
+}
+
+#[derive(Debug)]
+pub enum NormalizedFlow {
+    UserRemote(UserRemote),
+    UserUser(UserUser),
+    Other(packet_parser::FiveTuple, u64),
+}
+
+#[derive(Debug)]
+pub struct UserRemote {
+    pub user_addr: std::net::IpAddr,
+    pub remote_addr: std::net::IpAddr,
+    pub user_port: u16,
+    pub remote_port: u16,
+    pub protocol: u8,
+    pub bytes_up: u64,
+    pub bytes_down: u64,
+}
+
+#[derive(Debug)]
+pub struct UserUser {
+    pub a_addr: std::net::IpAddr,
+    pub b_addr: std::net::IpAddr,
+    pub a_port: u16,
+    pub b_port: u16,
+    pub protocol: u8,
+    pub bytes_a_to_b: u64,
+    pub bytes_b_to_a: u64,
+}
+
+fn normalize_address(
+    flow_fivetuple: &packet_parser::FiveTuple,
+    bytes: u64,
+    user_subnet: &ipnetwork::IpNetwork,
+    non_user_addrs: &HashSet<std::net::IpAddr>,
+) -> NormalizedFlow {
+    let mut src_is_user = false;
+    let mut dst_is_user = false;
+
+    if user_subnet.contains(flow_fivetuple.src) && !non_user_addrs.contains(&flow_fivetuple.src) {
+        src_is_user = true;
+    }
+    if user_subnet.contains(flow_fivetuple.dst) && !non_user_addrs.contains(&flow_fivetuple.dst) {
+        dst_is_user = true;
+    }
+
+    if src_is_user && !dst_is_user {
+        return NormalizedFlow::UserRemote(UserRemote {
+            user_addr: flow_fivetuple.src,
+            remote_addr: flow_fivetuple.dst,
+            user_port: flow_fivetuple.src_port,
+            remote_port: flow_fivetuple.dst_port,
+            protocol: flow_fivetuple.protocol,
+            bytes_up: bytes,
+            bytes_down: 0,
+        });
+    } else if !src_is_user && dst_is_user {
+        return NormalizedFlow::UserRemote(UserRemote {
+            user_addr: flow_fivetuple.dst,
+            remote_addr: flow_fivetuple.src,
+            user_port: flow_fivetuple.dst_port,
+            remote_port: flow_fivetuple.src_port,
+            protocol: flow_fivetuple.protocol,
+            bytes_up: 0,
+            bytes_down: bytes,
+        });
+    } else if src_is_user && dst_is_user {
+        // Normalize all user-user flows to assign endpoint a to the lower IP address.
+        if flow_fivetuple.src < flow_fivetuple.dst {
+            return NormalizedFlow::UserUser(UserUser {
+                a_addr: flow_fivetuple.src,
+                b_addr: flow_fivetuple.dst,
+                a_port: flow_fivetuple.src_port,
+                b_port: flow_fivetuple.dst_port,
+                protocol: flow_fivetuple.protocol,
+                bytes_a_to_b: bytes,
+                bytes_b_to_a: 0,
+            });
+        } else {
+            return NormalizedFlow::UserUser(UserUser {
+                a_addr: flow_fivetuple.dst,
+                b_addr: flow_fivetuple.src,
+                a_port: flow_fivetuple.dst_port,
+                b_port: flow_fivetuple.src_port,
+                protocol: flow_fivetuple.protocol,
+                bytes_a_to_b: 0,
+                bytes_b_to_a: bytes,
+            });
+        }
+    } else {
+        return NormalizedFlow::Other(flow_fivetuple.clone(), bytes);
     }
 }

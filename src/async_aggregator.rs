@@ -96,6 +96,10 @@ where
 {
     let mut bytes_aggregated: u64 = 0;
     let mut timer = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    reporter
+        .initialize()
+        .await
+        .expect("Failed to initialize user reporter");
     loop {
         tokio::select! {
             _ = timer.tick() => {

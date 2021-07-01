@@ -9,7 +9,7 @@ pub struct PacketInfo {
     pub dns_response: Option<parse_dns::DnsResponse>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct FiveTuple {
     pub src: std::net::IpAddr,
     pub dst: std::net::IpAddr,
