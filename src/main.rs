@@ -168,12 +168,10 @@ async fn main() {
     );
     let db_pool = std::sync::Arc::new(db_pool);
 
-    let local_reporter = UserReporter::new(db_pool.clone());
-
     // Create the main user aggregator
-    let user_aggregator = async_aggregator::AsyncAggregator::new(
+    let user_aggregator = async_aggregator::AsyncAggregator::new::<UserReporter>(
         config.user_log_interval,
-        local_reporter,
+        db_pool.clone(),
         root_log.new(o!("aggregator" => "user")),
     );
 

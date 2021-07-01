@@ -7,13 +7,17 @@ pub struct AsyncAggregator {
     dispatch_channel: tokio::sync::mpsc::Sender<Message>,
 }
 impl AsyncAggregator {
-    pub fn new<T>(period: std::time::Duration, reporter: T, log: slog::Logger) -> AsyncAggregator
+    pub fn new<T>(
+        period: std::time::Duration,
+        db_pool: std::sync::Arc<sqlx::PgPool>,
+        log: slog::Logger,
+    ) -> AsyncAggregator
     where
         T: Reporter + Send + Sync + Clone + 'static,
     {
         let (sender, receiver) = tokio::sync::mpsc::channel(64);
         let dispatch_handle = tokio::task::spawn(async move {
-            aggregate_dispatcher(receiver, period, reporter, log).await;
+            aggregate_dispatcher::<T>(receiver, period, db_pool, log).await;
         });
         AsyncAggregator {
             dispatch_handle: dispatch_handle,
@@ -32,7 +36,7 @@ pub enum Message {
 async fn aggregate_dispatcher<T>(
     mut chan: tokio::sync::mpsc::Receiver<Message>,
     period: std::time::Duration,
-    reporter: T,
+    db_pool: std::sync::Arc<sqlx::PgPool>,
     log: slog::Logger,
 ) -> ()
 where
@@ -49,7 +53,7 @@ where
                     let worker_log =
                         log.new(slog::o!("aggregation" => String::from(format!("{:?}", dest))));
 
-                    let new_reporter = reporter.clone();
+                    let new_reporter = T::new(db_pool.clone(), dest.clone());
                     directory.insert(dest.clone(), worker_chan_send);
                     tokio::task::spawn(async move {
                         aggregate_worker(dest, worker_chan_recv, period, new_reporter, worker_log)
@@ -84,7 +88,7 @@ async fn aggregate_worker<T>(
     id: std::net::IpAddr,
     mut chan: tokio::sync::mpsc::Receiver<WorkerMessage>,
     period: std::time::Duration,
-    reporter: T,
+    mut reporter: T,
     log: slog::Logger,
 ) -> ()
 where
