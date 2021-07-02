@@ -9,6 +9,7 @@ use sqlx::prelude::*;
 use structopt::StructOpt;
 
 mod async_aggregator;
+mod enforcer;
 mod packet_parser;
 mod reporter;
 
@@ -185,6 +186,12 @@ async fn main() {
         root_log.new(o!("aggregator" => "user")),
     );
 
+    let user_enforcer = enforcer::UserEnforcer::new(
+        config.user_log_interval,
+        db_pool.clone(),
+        root_log.new(o!("enforcer" => "user")),
+    );
+
     // This is a lambda closure to do a match in the filter function! Cool...
     let interface_name_match =
         |iface: &pnet_datalink::NetworkInterface| iface.name == config.interface;
@@ -213,9 +220,17 @@ async fn main() {
                 let packet_data_copy = bytes::Bytes::copy_from_slice(packet);
                 let packet_log = interface_log.new(o!());
                 let channel = user_aggregator.clone_input_channel();
+                let enforcer_channel = user_enforcer.clone_input_channel();
                 let config = config.clone();
                 tokio::task::spawn(async move {
-                    handle_packet(packet_data_copy, channel, config, packet_log).await;
+                    handle_packet(
+                        packet_data_copy,
+                        channel,
+                        enforcer_channel,
+                        config,
+                        packet_log,
+                    )
+                    .await;
                 });
             }
             Err(e) => {
@@ -228,6 +243,7 @@ async fn main() {
 async fn handle_packet<'a>(
     packet: bytes::Bytes,
     user_agg_channel: tokio::sync::mpsc::Sender<async_aggregator::Message>,
+    user_enforcer_channel: tokio::sync::mpsc::Sender<enforcer::Message>,
     config: std::sync::Arc<config::Internal>,
     log: Logger,
 ) -> () {
@@ -247,6 +263,15 @@ async fn handle_packet<'a>(
                     user_agg_channel
                         .send(async_aggregator::Message::Report {
                             id: flow.user_addr,
+                            amount: flow.bytes_down + flow.bytes_up,
+                        })
+                        .await
+                        .unwrap_or_else(
+                            |e| slog::error!(log, "Failed to send to dispatcher"; "error" => e.to_string()),
+                        );
+                    user_enforcer_channel
+                        .send(enforcer::Message::Report {
+                            ip: flow.user_addr,
                             amount: flow.bytes_down + flow.bytes_up,
                         })
                         .await
