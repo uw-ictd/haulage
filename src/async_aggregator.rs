@@ -102,10 +102,15 @@ where
 
     let mut timer = tokio::time::interval_at(interval_start + period, period);
 
-    reporter
-        .initialize()
-        .await
-        .expect("Failed to initialize user reporter");
+    match reporter.initialize().await {
+        Ok(_) => {},
+        Err(e) => {
+            slog::error!(log, "Failed to initialize reporter"; "id" => id.to_string(), "error" => e.to_string());
+            chan.close();
+            return;
+        }
+
+    }
     loop {
         tokio::select! {
             _ = timer.tick() => {

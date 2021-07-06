@@ -6,7 +6,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ReportError {
-    #[error("Report failed to connect to the database")]
+    #[error("Database operation failed: {0}")]
     DatabaseError(#[from] sqlx::error::Error),
     #[error("Failed to lookup user")]
     UserLookupError,
@@ -75,8 +75,7 @@ impl Reporter for UserReporter {
         let rows: Vec<IdRow> = sqlx::query_as(id_query)
             .bind(ipnetwork::IpNetwork::from(self.ip_addr))
             .fetch_all(&mut transaction)
-            .await
-            .or(Err(ReportError::UserLookupError))?;
+            .await?;
 
         // Ensure the user is unique
         if rows.len() != 1 {
