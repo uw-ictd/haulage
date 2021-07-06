@@ -9,7 +9,7 @@ use sqlx::prelude::*;
 use structopt::StructOpt;
 
 mod async_aggregator;
-mod enforcer;
+mod accounter;
 mod packet_parser;
 mod reporter;
 
@@ -186,10 +186,10 @@ async fn main() {
         root_log.new(o!("aggregator" => "user")),
     );
 
-    let user_enforcer = enforcer::UserEnforcer::new(
+    let user_accounter = accounter::UserAccounter::new(
         config.user_log_interval,
         db_pool.clone(),
-        root_log.new(o!("enforcer" => "user")),
+        root_log.new(o!("accounter" => "user")),
     );
 
     // This is a lambda closure to do a match in the filter function! Cool...
@@ -220,7 +220,7 @@ async fn main() {
                 let packet_data_copy = bytes::Bytes::copy_from_slice(packet);
                 let packet_log = interface_log.new(o!());
                 let channel = user_aggregator.clone_input_channel();
-                let enforcer_channel = user_enforcer.clone_input_channel();
+                let enforcer_channel = user_accounter.clone_input_channel();
                 let config = config.clone();
                 tokio::task::spawn(async move {
                     handle_packet(
@@ -243,7 +243,7 @@ async fn main() {
 async fn handle_packet<'a>(
     packet: bytes::Bytes,
     user_agg_channel: tokio::sync::mpsc::Sender<async_aggregator::Message>,
-    user_enforcer_channel: tokio::sync::mpsc::Sender<enforcer::Message>,
+    user_enforcer_channel: tokio::sync::mpsc::Sender<accounter::Message>,
     config: std::sync::Arc<config::Internal>,
     log: Logger,
 ) -> () {
@@ -275,7 +275,7 @@ async fn handle_packet<'a>(
                             |e| slog::error!(log, "Failed to send to dispatcher"; "error" => e.to_string()),
                         );
                     user_enforcer_channel
-                        .send(enforcer::Message::Report {
+                        .send(accounter::Message::Report {
                             ip: flow.user_addr,
                             amount: flow.bytes_down + flow.bytes_up,
                         })

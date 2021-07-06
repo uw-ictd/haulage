@@ -3,21 +3,21 @@ use std::collections::HashMap;
 pub use i32 as UserId;
 
 #[derive(Debug)]
-pub struct UserEnforcer {
+pub struct UserAccounter {
     dispatch_handle: tokio::task::JoinHandle<()>,
     dispatch_channel: tokio::sync::mpsc::Sender<Message>,
 }
-impl UserEnforcer {
+impl UserAccounter {
     pub fn new(
         period: std::time::Duration,
         db_pool: std::sync::Arc<sqlx::PgPool>,
         log: slog::Logger,
-    ) -> UserEnforcer {
+    ) -> UserAccounter {
         let (sender, receiver) = tokio::sync::mpsc::channel(64);
         let dispatch_handle = tokio::task::spawn(async move {
-            enforcement_task_dispatcher(receiver, period, db_pool, log).await;
+            accounting_task_dispatcher(receiver, period, db_pool, log).await;
         });
-        UserEnforcer {
+        UserAccounter {
             dispatch_handle: dispatch_handle,
             dispatch_channel: sender,
         }
@@ -31,7 +31,7 @@ pub enum Message {
     Report { ip: std::net::IpAddr, amount: u64 },
 }
 
-async fn enforcement_task_dispatcher(
+async fn accounting_task_dispatcher(
     mut chan: tokio::sync::mpsc::Receiver<Message>,
     period: std::time::Duration,
     db_pool: std::sync::Arc<sqlx::PgPool>,
@@ -52,7 +52,7 @@ async fn enforcement_task_dispatcher(
 
                     directory.insert(dest.clone(), worker_chan_send);
                     tokio::task::spawn(async move {
-                        enforcement_worker(dest, worker_chan_recv, period, db_pool, worker_log)
+                        accounting_worker(dest, worker_chan_recv, period, db_pool, worker_log)
                             .await;
                     });
                 }
@@ -80,7 +80,7 @@ enum WorkerMessage {
     },
 }
 
-async fn enforcement_worker(
+async fn accounting_worker(
     ip: std::net::IpAddr,
     mut chan: tokio::sync::mpsc::Receiver<WorkerMessage>,
     db_change_poll_period: std::time::Duration,
