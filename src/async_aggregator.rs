@@ -97,7 +97,7 @@ where
     // relatively long time durations (minutes) targeted by the software though.
     let mut resources_aggregated = crate::NetResourceBundle::zeroed();
 
-    let mut interval_start = tokio::time::Instant::now();
+    let interval_start = tokio::time::Instant::now();
     let mut start_chrono = chrono::Utc::now();
 
     let mut timer = tokio::time::interval_at(interval_start + period, period);

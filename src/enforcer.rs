@@ -70,18 +70,12 @@ async fn enforcement_task_dispatcher(
     }
 }
 
-struct UserState {
-    id: UserId,
-    data_balance: i64,
-    bridged: bool,
-}
-
 #[derive(Debug)]
 enum WorkerMessage {
     Report {
         amount: u64,
     },
-    GetBalance {
+    _GetBalance {
         out_channel: tokio::sync::oneshot::Sender<i64>,
     },
 }
@@ -154,7 +148,7 @@ async fn enforcement_worker(
                             bytes_aggregated = 0;
                         }
                     }
-                    WorkerMessage::GetBalance{out_channel} => {
+                    WorkerMessage::_GetBalance{out_channel} => {
                         // ToDo(matt9j) This might panic during shutdown, if there is a
                         // get request in flight as the dispatcher shuts down?
 
