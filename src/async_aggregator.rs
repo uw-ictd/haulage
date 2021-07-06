@@ -30,7 +30,7 @@ impl AsyncAggregator {
 }
 
 pub enum Message {
-    Report { id: std::net::IpAddr, amount: u64 },
+    Report { id: std::net::IpAddr, amount: crate::NetResourceBundle },
 }
 
 async fn aggregate_dispatcher<T>(
@@ -48,6 +48,7 @@ where
     while let Some(message) = chan.recv().await {
         match message {
             Message::Report { id: dest, amount } => {
+                slog::debug!(log, "Received at aggregator dispatch {:?} {:?}", dest, amount);
                 if !directory.contains_key(&dest) {
                     let (worker_chan_send, worker_chan_recv) = tokio::sync::mpsc::channel(32);
                     let worker_log =
@@ -68,7 +69,6 @@ where
                     .unwrap_or_else(
                         |e| slog::error!(log, "Failed to dispatch"; "error" => e.to_string()),
                     );
-                slog::debug!(log, "Received at dispatch {:?} {}", dest, amount);
             }
         };
     }
@@ -77,11 +77,8 @@ where
 #[derive(Debug)]
 enum WorkerMessage {
     Report {
-        amount: u64,
-    },
-    _GetTotal {
-        out_channel: tokio::sync::oneshot::Sender<u64>,
-    },
+        amount: crate::NetResourceBundle,
+    }
 }
 
 async fn aggregate_worker<T>(
@@ -94,8 +91,17 @@ async fn aggregate_worker<T>(
 where
     T: Reporter + Send + Sync + Clone + 'static,
 {
-    let mut bytes_aggregated: u64 = 0;
-    let mut timer = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    // Note: This timing is relatively imprecise since the timestamping is
+    // happening in an async context. Ideally the timestamping could happen in
+    // hardware per packet. This simple approach is sufficient for the
+    // relatively long time durations (minutes) targeted by the software though.
+    let mut resources_aggregated = crate::NetResourceBundle::zeroed();
+
+    let mut interval_start = tokio::time::Instant::now();
+    let mut start_chrono = chrono::Utc::now();
+
+    let mut timer = tokio::time::interval_at(interval_start + period, period);
+
     reporter
         .initialize()
         .await
@@ -103,7 +109,20 @@ where
     loop {
         tokio::select! {
             _ = timer.tick() => {
-                let result = reporter.report(bytes_aggregated).await;
+                let tick_time = chrono::Utc::now();
+                let record_start = start_chrono;
+                let record_stop = tick_time;
+                let archived_resources = resources_aggregated;
+
+                // Reset the loop state variables for the next interval
+                resources_aggregated = crate::NetResourceBundle::zeroed();
+                start_chrono = tick_time;
+
+                let result = reporter.report(crate::reporter::UseRecord{
+                    start: record_start,
+                    end: record_stop,
+                    usage: archived_resources,
+                }).await;
                 match result {
                     Ok(_) => {},
                     Err(e) => {
@@ -117,13 +136,8 @@ where
                 }
                 match message.unwrap() {
                     WorkerMessage::Report{amount} => {
-                        bytes_aggregated += amount;
-                        slog::debug!(log, "Aggregated {} bytes", bytes_aggregated);
-                    }
-                    WorkerMessage::_GetTotal{out_channel} => {
-                        // ToDo(matt9j) This might panic during shutdown, if there is a
-                        // get request in flight as the dispatcher shuts down?
-                        out_channel.send(bytes_aggregated).expect("Failed to send oneshot return");
+                        resources_aggregated += amount;
+                        slog::debug!(log, "Aggregated {:?} bytes", resources_aggregated);
                     }
                 }
             }

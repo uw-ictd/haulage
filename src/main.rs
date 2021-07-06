@@ -263,7 +263,12 @@ async fn handle_packet<'a>(
                     user_agg_channel
                         .send(async_aggregator::Message::Report {
                             id: flow.user_addr,
-                            amount: flow.bytes_down + flow.bytes_up,
+                            amount: NetResourceBundle {
+                                ran_bytes_down: flow.bytes_down as i64,
+                                ran_bytes_up: flow.bytes_up as i64,
+                                wan_bytes_down: flow.bytes_down as i64,
+                                wan_bytes_up: flow.bytes_up as i64,
+                            }
                         })
                         .await
                         .unwrap_or_else(
@@ -283,7 +288,12 @@ async fn handle_packet<'a>(
                     user_agg_channel
                         .send(async_aggregator::Message::Report {
                             id: flow.a_addr,
-                            amount: flow.bytes_a_to_b + flow.bytes_b_to_a,
+                            amount: NetResourceBundle {
+                                ran_bytes_down: flow.bytes_b_to_a as i64,
+                                ran_bytes_up: flow.bytes_a_to_b as i64,
+                                wan_bytes_down: 0,
+                                wan_bytes_up: 0,
+                            }
                         })
                         .await
                         .unwrap_or_else(
@@ -292,7 +302,12 @@ async fn handle_packet<'a>(
                     user_agg_channel
                         .send(async_aggregator::Message::Report {
                             id: flow.b_addr,
-                            amount: flow.bytes_a_to_b + flow.bytes_b_to_a,
+                            amount: NetResourceBundle {
+                                ran_bytes_down: flow.bytes_a_to_b as i64,
+                                ran_bytes_up: flow.bytes_b_to_a as i64,
+                                wan_bytes_down: 0,
+                                wan_bytes_up: 0,
+                            }
                         })
                         .await
                         .unwrap_or_else(
@@ -342,6 +357,44 @@ pub struct UserUser {
     pub protocol: u8,
     pub bytes_a_to_b: u64,
     pub bytes_b_to_a: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NetResourceBundle {
+    pub ran_bytes_up: i64,
+    pub ran_bytes_down: i64,
+    pub wan_bytes_up: i64,
+    pub wan_bytes_down: i64,
+}
+impl std::ops::Add for NetResourceBundle {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        NetResourceBundle {
+            ran_bytes_up: self.ran_bytes_up + other.ran_bytes_up,
+            ran_bytes_down: self.ran_bytes_down + other.ran_bytes_down,
+            wan_bytes_up: self.wan_bytes_up + other.wan_bytes_up,
+            wan_bytes_down: self.wan_bytes_down + other.wan_bytes_down,
+        }
+    }
+}
+impl std::ops::AddAssign for NetResourceBundle {
+    fn add_assign(&mut self, rhs: Self) {
+        self.ran_bytes_up = self.ran_bytes_up + rhs.ran_bytes_up;
+        self.ran_bytes_down = self.ran_bytes_down + rhs.ran_bytes_down;
+        self.wan_bytes_up = self.wan_bytes_up + rhs.wan_bytes_up;
+        self.wan_bytes_down = self.wan_bytes_down + rhs.wan_bytes_down;
+    }
+}
+impl NetResourceBundle {
+    fn zeroed() -> Self {
+        NetResourceBundle {
+            ran_bytes_up: 0,
+            ran_bytes_down: 0,
+            wan_bytes_up: 0,
+            wan_bytes_down: 0
+        }
+    }
 }
 
 fn normalize_address(

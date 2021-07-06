@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -13,7 +14,7 @@ pub enum ReportError {
 
 #[async_trait]
 pub trait Reporter {
-    async fn report(&mut self, amount: u64) -> Result<(), ReportError>;
+    async fn report(&self, use_record: UseRecord) -> Result<(), ReportError>;
     fn new(pool: Arc<sqlx::PgPool>, id: std::net::IpAddr) -> Self;
     async fn initialize(&mut self) -> Result<(), ReportError>;
 }
@@ -21,59 +22,31 @@ pub trait Reporter {
 #[derive(Debug, Clone)]
 pub struct UserReporter {
     db_pool: Arc<sqlx::PgPool>,
-    id: std::net::IpAddr,
-    data_balance: i64,
+    ip_addr: std::net::IpAddr,
+    id: i32,
 }
 
 #[async_trait]
 impl Reporter for UserReporter {
-    async fn report(&mut self, amount: u64) -> Result<(), ReportError> {
+    async fn report(&self, record: UseRecord) -> Result<(), ReportError> {
+        if self.id < 0 {
+            // TODO Actually enforce at compile time rather than with a runtime panic.
+            panic!("Invalid ID: reporter not initialized!");
+        }
         let mut transaction = self.db_pool.begin().await?;
 
-        let current_state_query = r#"
-            SELECT "ip", subscribers."imsi", "internal_uid" AS "subscriber_id", "data_balance", "balance", "bridged"
-            FROM subscribers
-            INNER JOIN static_ips ON static_ips.imsi = subscribers.imsi
-            WHERE static_ips.ip = $1
-        "#;
-
-        let rows: Vec<SubscriberRow> = sqlx::query_as(current_state_query)
-            .bind(ipnetwork::IpNetwork::from(self.id))
-            .fetch_all(&mut transaction)
-            .await
-            .or(Err(ReportError::UserLookupError))?;
-
-        // Ensure the user is unique
-        if rows.len() != 1 {
-            return Err(ReportError::UserLookupError);
-        }
-        let user_state = rows.first().unwrap();
-
-        let new_data_balance = user_state.data_balance - (amount as i64);
-        self.data_balance = new_data_balance;
-
         let update_history_query = r#"
-            INSERT INTO subscriber_history("subscriber", "time", "data_balance", "balance", "bridged")
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO subscriber_usage("subscriber", "start_time", "end_time", "ran_bytes_up", "ran_bytes_down", "wan_bytes_up", "wan_bytes_down")
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#;
         sqlx::query(update_history_query)
-            .bind(&user_state.subscriber_id)
-            .bind(chrono::Utc::now())
-            .bind(&new_data_balance)
-            .bind(&user_state.balance)
-            .bind(&user_state.bridged)
-            .execute(&mut transaction)
-            .await?;
-
-        let subscriber_update_query = r#"
-            UPDATE subscribers
-            SET "data_balance" = $1
-            WHERE "internal_uid" = $2
-        "#;
-
-        sqlx::query(subscriber_update_query)
-            .bind(&new_data_balance)
-            .bind(&user_state.subscriber_id)
+            .bind(&self.id)
+            .bind(&record.start)
+            .bind(&record.end)
+            .bind(&record.usage.ran_bytes_up)
+            .bind(&record.usage.ran_bytes_down)
+            .bind(&record.usage.wan_bytes_up)
+            .bind(&record.usage.wan_bytes_down)
             .execute(&mut transaction)
             .await?;
 
@@ -81,26 +54,26 @@ impl Reporter for UserReporter {
         Ok(())
     }
 
-    fn new(pool: Arc<sqlx::PgPool>, id: std::net::IpAddr) -> Self {
+    fn new(pool: Arc<sqlx::PgPool>, ip: std::net::IpAddr) -> Self {
         Self {
             db_pool: pool,
-            id: id,
-            data_balance: -1,
+            ip_addr: ip,
+            id: -1,
         }
     }
 
     async fn initialize(&mut self) -> Result<(), ReportError> {
         let mut transaction = self.db_pool.begin().await?;
 
-        let balance_state_query = r#"
-            SELECT "ip", "data_balance", "bridged"
+        let id_query = r#"
+            SELECT "internal_uid" AS "subscriber_id", ip
             FROM subscribers
             INNER JOIN static_ips ON static_ips.imsi = subscribers.imsi
             WHERE static_ips.ip = $1
         "#;
 
-        let rows: Vec<DataBalanceRow> = sqlx::query_as(balance_state_query)
-            .bind(ipnetwork::IpNetwork::from(self.id))
+        let rows: Vec<IdRow> = sqlx::query_as(id_query)
+            .bind(ipnetwork::IpNetwork::from(self.ip_addr))
             .fetch_all(&mut transaction)
             .await
             .or(Err(ReportError::UserLookupError))?;
@@ -111,9 +84,17 @@ impl Reporter for UserReporter {
         }
         let user_state = rows.first().unwrap();
 
-        self.data_balance = user_state.data_balance;
+        self.id = user_state.subscriber_id;
         Ok(())
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct UseRecord {
+    pub start: chrono::DateTime<Utc>,
+    pub end: chrono::DateTime<Utc>,
+
+    pub usage: crate::NetResourceBundle,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -136,8 +117,7 @@ struct SubscriberRow {
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
-struct DataBalanceRow {
+struct IdRow {
+    subscriber_id: i32,
     ip: ipnetwork::IpNetwork,
-    data_balance: i64,
-    bridged: bool,
 }
