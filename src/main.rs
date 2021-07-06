@@ -8,8 +8,8 @@ use slog::*;
 use sqlx::prelude::*;
 use structopt::StructOpt;
 
-mod async_aggregator;
 mod accounter;
+mod async_aggregator;
 mod packet_parser;
 mod reporter;
 
@@ -392,7 +392,7 @@ impl NetResourceBundle {
             ran_bytes_up: 0,
             ran_bytes_down: 0,
             wan_bytes_up: 0,
-            wan_bytes_down: 0
+            wan_bytes_down: 0,
         }
     }
 }

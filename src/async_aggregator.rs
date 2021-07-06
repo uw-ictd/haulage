@@ -30,7 +30,10 @@ impl AsyncAggregator {
 }
 
 pub enum Message {
-    Report { id: std::net::IpAddr, amount: crate::NetResourceBundle },
+    Report {
+        id: std::net::IpAddr,
+        amount: crate::NetResourceBundle,
+    },
 }
 
 async fn aggregate_dispatcher<T>(
@@ -48,7 +51,12 @@ where
     while let Some(message) = chan.recv().await {
         match message {
             Message::Report { id: dest, amount } => {
-                slog::debug!(log, "Received at aggregator dispatch {:?} {:?}", dest, amount);
+                slog::debug!(
+                    log,
+                    "Received at aggregator dispatch {:?} {:?}",
+                    dest,
+                    amount
+                );
                 if !directory.contains_key(&dest) {
                     let (worker_chan_send, worker_chan_recv) = tokio::sync::mpsc::channel(32);
                     let worker_log =
@@ -76,9 +84,7 @@ where
 
 #[derive(Debug)]
 enum WorkerMessage {
-    Report {
-        amount: crate::NetResourceBundle,
-    }
+    Report { amount: crate::NetResourceBundle },
 }
 
 async fn aggregate_worker<T>(
@@ -103,13 +109,12 @@ where
     let mut timer = tokio::time::interval_at(interval_start + period, period);
 
     match reporter.initialize().await {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(e) => {
             slog::error!(log, "Failed to initialize reporter"; "id" => id.to_string(), "error" => e.to_string());
             chan.close();
             return;
         }
-
     }
     loop {
         tokio::select! {
