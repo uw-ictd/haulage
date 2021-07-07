@@ -11,11 +11,12 @@ impl UserAccounter {
     pub fn new(
         period: std::time::Duration,
         db_pool: std::sync::Arc<sqlx::PgPool>,
+        enforcer: std::sync::Arc<crate::enforcer::Iptables>,
         log: slog::Logger,
     ) -> UserAccounter {
         let (sender, receiver) = tokio::sync::mpsc::channel(64);
         let dispatch_handle = tokio::task::spawn(async move {
-            accounting_task_dispatcher(receiver, period, db_pool, log).await;
+            accounting_task_dispatcher(receiver, period, db_pool, enforcer, log).await;
         });
         UserAccounter {
             dispatch_handle: dispatch_handle,
@@ -35,6 +36,7 @@ async fn accounting_task_dispatcher(
     mut chan: tokio::sync::mpsc::Receiver<Message>,
     period: std::time::Duration,
     db_pool: std::sync::Arc<sqlx::PgPool>,
+    enforcer: std::sync::Arc<crate::enforcer::Iptables>,
     log: slog::Logger,
 ) -> () {
     let mut directory: HashMap<std::net::IpAddr, tokio::sync::mpsc::Sender<WorkerMessage>> =
@@ -49,11 +51,19 @@ async fn accounting_task_dispatcher(
                         log.new(slog::o!("aggregation" => String::from(format!("{:?}", dest))));
 
                     let db_pool = db_pool.clone();
+                    let enforcer = std::sync::Arc::clone(&enforcer);
 
                     directory.insert(dest.clone(), worker_chan_send);
                     tokio::task::spawn(async move {
-                        accounting_worker(dest, worker_chan_recv, period, db_pool, worker_log)
-                            .await;
+                        accounting_worker(
+                            dest,
+                            worker_chan_recv,
+                            period,
+                            db_pool,
+                            enforcer,
+                            worker_log,
+                        )
+                        .await;
                     });
                 }
                 directory
@@ -85,6 +95,7 @@ async fn accounting_worker(
     mut chan: tokio::sync::mpsc::Receiver<WorkerMessage>,
     db_change_poll_period: std::time::Duration,
     db_pool: std::sync::Arc<sqlx::PgPool>,
+    enforcer: std::sync::Arc<crate::enforcer::Iptables>,
     log: slog::Logger,
 ) -> () {
     // Lookup current balance from DB
@@ -92,8 +103,6 @@ async fn accounting_worker(
     let subscriber_id = current_state.subscriber_id;
     let mut balance = current_state.data_balance;
     let mut bytes_aggregated: i64 = 0;
-
-    // TODO Set appropriate initial bridge state based on current balance
 
     let mut timer = tokio::time::interval_at(
         tokio::time::Instant::now() + db_change_poll_period,
@@ -105,10 +114,14 @@ async fn accounting_worker(
                 let update_result = update_balance(&db_pool, subscriber_id, -bytes_aggregated, &log).await;
                 match update_result {
                     Ok(new_state) => {
-                        // Handle the transition to zero balance and update the timer interval
+                        // Detect if the subscriber's balance has gone negative after synchronizing with the DB
                         if (new_state.data_balance <= 0) && (balance > 0) {
-                            // TODO Add rule
-                            // TODO update timer rate
+                            enforcer
+                                .update_policy(subscriber_id, crate::enforcer::Policy::LocalOnly)
+                                .await
+                                .unwrap_or_else(
+                                    |e| slog::error!(log, "Unable to update policy for zero balance sub"; "error" => e.to_string())
+                                );
                         }
 
                         balance = new_state.data_balance;
@@ -133,10 +146,14 @@ async fn accounting_worker(
                             let update_result = update_balance(&db_pool, subscriber_id, -bytes_aggregated, &log).await;
                             match update_result {
                                 Ok(new_state) => {
-                                    // Handle the transition to zero balance and update the timer interval
+                                    // Handle the transition to zero balance
                                     if (new_state.data_balance <= 0) && (balance > 0) {
-                                        // TODO Add rule
-                                        // TODO update timer rate
+                                        enforcer
+                                            .update_policy(subscriber_id, crate::enforcer::Policy::LocalOnly)
+                                            .await
+                                            .unwrap_or_else(
+                                                |e| slog::error!(log, "Unable to update policy for zero balance sub"; "error" => e.to_string())
+                                            );
                                     }
 
                                     balance = new_state.data_balance;

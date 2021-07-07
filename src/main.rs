@@ -10,6 +10,7 @@ use structopt::StructOpt;
 
 mod accounter;
 mod async_aggregator;
+mod enforcer;
 mod packet_parser;
 mod reporter;
 
@@ -68,6 +69,7 @@ mod config {
         pub db_pass: String,
         pub flow_log_interval: std::time::Duration,
         pub user_log_interval: std::time::Duration,
+        pub reenable_poll_interval: std::time::Duration,
         pub interface: String,
         pub user_subnet: ipnetwork::IpNetwork,
         pub ignored_user_addresses: std::collections::HashSet<std::net::IpAddr>,
@@ -128,6 +130,7 @@ async fn main() {
                 db_pass: parsed_config.custom.db_pass,
                 flow_log_interval: parsed_config.flow_log_interval,
                 user_log_interval: parsed_config.user_log_interval,
+                reenable_poll_interval: parsed_config.custom.reenable_poll_interval,
                 interface: parsed_config.interface,
                 user_subnet: ipnetwork::IpNetwork::from_str(&parsed_config.user_subnet).unwrap(),
                 ignored_user_addresses: HashSet::from_iter(
@@ -179,7 +182,14 @@ async fn main() {
     );
     let db_pool = std::sync::Arc::new(db_pool);
 
-    // Create the main user aggregator
+    // Create the main user aggregation, accounting, and enforcement subsystems.
+    let user_enforcer = enforcer::Iptables::new(
+        config.reenable_poll_interval,
+        std::sync::Arc::clone(&db_pool),
+        root_log.new(o!("subsystem" => "user_enforcer")),
+    );
+    let user_enforcer = std::sync::Arc::new(user_enforcer);
+
     let user_aggregator = async_aggregator::AsyncAggregator::new::<UserReporter>(
         config.user_log_interval,
         db_pool.clone(),
@@ -189,6 +199,7 @@ async fn main() {
     let user_accounter = accounter::UserAccounter::new(
         config.user_log_interval,
         db_pool.clone(),
+        std::sync::Arc::clone(&user_enforcer),
         root_log.new(o!("accounter" => "user")),
     );
 
