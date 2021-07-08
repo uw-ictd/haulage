@@ -5,6 +5,7 @@ use std::str::FromStr;
 use git_version::git_version;
 use reporter::UserReporter;
 use slog::*;
+use sqlx::migrate::Migrate;
 use sqlx::prelude::*;
 use structopt::StructOpt;
 
@@ -24,6 +25,17 @@ struct Opt {
         default_value = "/etc/haulage/config.yml"
     )]
     config: std::path::PathBuf,
+
+    /// Run pending schema migrations agains the local database
+    #[structopt(long = "db-upgrade")]
+    migrate: bool,
+
+    /// The path of the directory containing database migration files.
+    #[structopt(
+        long = "db-migration-directory",
+        default_value = "/usr/share/haulage/migrations"
+    )]
+    migration_directory: std::path::PathBuf,
 
     /// Show debug log information
     #[structopt(short = "v", long = "verbose")]
@@ -181,6 +193,75 @@ async fn main() {
         config.db_user
     );
     let db_pool = std::sync::Arc::new(db_pool);
+
+    let migrator = sqlx::migrate::Migrator::new(opt.migration_directory)
+        .await
+        .expect("Unable to read available database schema migrationsa");
+
+    // If requested, run any necessary database migrations
+    if opt.migrate {
+        slog::warn!(
+            root_log,
+            "Running database migrations, this process can not be easily undone!"
+        );
+        migrator.run(db_pool.as_ref()).await.unwrap();
+    }
+
+    // Get a set of available migrations and a set of applied migrations
+    let available_migrations: HashSet<_> = migrator.iter().map(|x| x.version).collect();
+    let applied_migrations: HashSet<_> = db_pool
+        .as_ref()
+        .acquire()
+        .await
+        .expect("Unable to acquire DB connection")
+        .list_applied_migrations()
+        .await
+        .expect("Unable to query the applied DB schema migrations")
+        .iter()
+        .map(|x| x.version)
+        .collect();
+
+    if available_migrations != applied_migrations {
+        slog::error!(
+            root_log,
+            "There is a difference between the expected set of DB schema migrations for this version of haulage \
+            and the migrations applied to the configured database."
+        );
+        let unapplied_migrations: HashSet<_> = available_migrations
+            .difference(&applied_migrations)
+            .collect();
+        let extra_migrations: HashSet<_> = applied_migrations
+            .difference(&available_migrations)
+            .collect();
+
+        if unapplied_migrations.len() != 0 {
+            slog::error!(
+                root_log,
+                "The following migrations are expected by this version of haulage, but not applied to the local database";
+                "unapplied_migrations" => format!("{:?}", unapplied_migrations)
+            );
+            if extra_migrations.len() == 0 {
+                slog::error!(
+                    root_log,
+                    "You can upgrade your database schema to be compatible with this version of haulage by manually running `haulage --db-upgrade`"
+                );
+                slog::error!(
+                    root_log,
+                    "***BE SURE TO BACK UP YOUR DATABASE BEFORE UPGRADING*** The upgrade operation cannot be easily undone."
+                );
+            }
+        }
+
+        if extra_migrations.len() != 0 {
+            slog::error!(
+                root_log,
+                "The following migrations are present in your database but unknown to this version of haulage!\n\
+                This cannot be fixed automatically, and you may need to re-create your database from scratch :/";
+                "extra_migrations" => format!("{:?}", extra_migrations)
+            );
+        }
+        panic!("Cannot proceed without correcting the database schema.");
+    }
 
     // Create the main user aggregation, accounting, and enforcement subsystems.
     let user_enforcer = enforcer::Iptables::new(
