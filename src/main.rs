@@ -205,6 +205,9 @@ async fn main() {
             "Running database migrations, this process can not be easily undone!"
         );
         migrator.run(db_pool.as_ref()).await.unwrap();
+        slog::info!(root_log, "Migrations complete, exiting haulage.");
+
+        return;
     }
 
     // Get a set of available migrations and a set of applied migrations
