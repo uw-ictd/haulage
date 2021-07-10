@@ -1,14 +1,8 @@
 # Git VCS parameters
 VERSION=$(shell git describe --tags | sed s/-g/+g/g)
 
-# Go parameters
-GOCMD=go
-GOBUILD=$(GOCMD) build
-GOCLEAN=$(GOCMD) clean
-GOTEST=$(GOCMD) test
-
 # NFPM parameters
-NFPM_VERSION = 2.2.3
+NFPM_VERSION = 2.5.1
 # This uses the somewhat confusing but standardized GNU architecture naming
 # scheme to be consistent with Debian (which can handle the complex case of
 # building compilers for different architectures). Build refers to the
@@ -24,7 +18,7 @@ else
 	$(error Unsupported build platform architecture $(BUILD_ARCH))
 endif
 
-TARGET_DIR=./build
+TARGET_DIR=./target
 
 .PHONY: all build package \
 build_arm64 build_x86_64 build-clean \
@@ -45,27 +39,27 @@ else
 endif
 
 build_arm64:
-	# A complex build line is required since gopacket uses the shared libpcap C library.
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/lib/aarch64-linux-gnu/" CC="aarch64-linux-gnu-gcc" $(GOBUILD) -o $(TARGET_DIR)/arm64/haulage -v
+	LIBSYSTEMD_LDFLAGS="-L/usr/lib/aarch64-linux-gnu/libsystemd.so" cargo build --release --target=aarch64-unknown-linux-gnu
 
 build_x86_64:
-	# A complex build line is required since gopacket uses the shared libpcap C library.
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/lib/x86_64-linux-gnu/" CC="x86_64-linux-gnu-gcc" $(GOBUILD) -o $(TARGET_DIR)/amd64/haulage -v
+	LIBSYSTEMD_LDFLAGS="-L/usr/lib/x86_64-linux-gnu/libsystemd.so" cargo build --release --target=x86_64-unknown-linux-gnu
 
 build-clean:
-	$(GOCLEAN)
+	cargo clean
 
-package_arm64: export HOST_ARCHITECTURE=arm64
+package_arm64: export HOST_ARCHITECTURE=aarch64-unknown-linux-gnu
+package_arm64: export DEB_ARCHITECTURE=arm64
 package_arm64: build_arm64 get_nfpm
 
-package_x86_64: export HOST_ARCHITECTURE=amd64
+package_x86_64: export HOST_ARCHITECTURE=x86_64-unknown-linux-gnu
+package_x86_64: export DEB_ARCHITECTURE=amd64
 package_x86_64: build_x86_64 get_nfpm
 
 package_arm64 package_x86_64: export VERSION := $(VERSION)
 package_arm64 package_x86_64:
 	$(info $$VERSION is [${VERSION}])
 	cat nfpm.yaml | \
-	envsubst '$${HOST_ARCHITECTURE}' | \
+	envsubst '$${HOST_ARCHITECTURE} $${DEB_ARCHITECTURE}' | \
 	$(TARGET_DIR)/nfpm/nfpm pkg --packager deb --config /dev/stdin --target $(TARGET_DIR)
 
 package-clean:
@@ -78,10 +72,9 @@ dist-clean: clean
 
 # Helper rules for installing build dependencies and tooling.
 quickstart_ubuntu:
-	wget https://dl.google.com/go/go1.14.linux-amd64.tar.gz
-	sudo tar -C /usr/local -xzf go1.14.linux-amd64.tar.gz
-	rm -rf go1.14.linux-amd64.tar.gz
-	sudo apt-get -y install libpcap-dev
+	wget https://sh.rustup.rs
+	sh sh.rustup.rs -y
+	sudo apt-get -y install libsystemd-dev
 	echo 'PATH=$$PATH:/usr/local/go/bin' >> ~/.profile
 
 get_nfpm: $(TARGET_DIR)/nfpm/nfpm

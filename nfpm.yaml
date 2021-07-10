@@ -1,5 +1,5 @@
 name: "haulage"
-arch: "${HOST_ARCHITECTURE}"
+arch: "${DEB_ARCHITECTURE}"
 platform: "linux"
 
 # Upstream Version. (required)
@@ -47,10 +47,9 @@ provides:
 
 # Dependencies. (overridable)
 depends:
-  - "libpcap0.8"
+  - "postgresql"
   - "python3"
-  - "default-mysql-client"
-  - "default-mysql-server"
+  - "python3-psycopg2"
   - "python3-yaml"
   - "python3-mysqldb"
 
@@ -70,14 +69,14 @@ conflicts:
 # This can be binaries or any other files.
 contents:
   # Basic files that applies to all packagers
-  - src: "./build/${HOST_ARCHITECTURE}/haulage"
+  - src: "./target/${HOST_ARCHITECTURE}/release/haulage"
     dst: "/usr/bin/haulage"
 
   - src: "./init/haulagedb.py"
     dst: "/usr/bin/haulagedb"
 
-  - src: "./haulage.sql"
-    dst: "/etc/haulage/haulage_sampledb.sql"
+  - src: "./migrations"
+    dst: "/usr/share/haulage/migrations"
 
   - src: "./init/haulage.service"
     dst: "/lib/systemd/system/haulage.service"
@@ -105,7 +104,7 @@ empty_folders:
 scripts:
   # preinstall: ./scripts/preinstall.sh
   postinstall: ./init/postinst
-  # preremove: ./scripts/preremove.sh
+  preremove: ./init/preremove.sh
   postremove: ./init/postrm
 
 # Custom configuration applied only to the Deb packager.
