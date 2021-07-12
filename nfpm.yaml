@@ -75,7 +75,7 @@ contents:
   - src: "./init/haulagedb.py"
     dst: "/usr/bin/haulagedb"
 
-  - src: "./migrations"
+  - src: "./haulage/migrations"
     dst: "/usr/share/haulage/migrations"
 
   - src: "./init/haulage.service"
