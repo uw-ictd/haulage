@@ -1,20 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-### ONLY create database if it doesn't already exist!
-mysqlshow | grep haulage_db
-if [ $? == 1 ]; then
-	# create haulage_db user and database
-	sudo mysql -e "CREATE DATABASE haulage_db;"
-	sudo mysql -e "CREATE USER haulage_db@localhost IDENTIFIED BY 'haulage_db';"
-	sudo mysql -e "GRANT ALL PRIVILEGES ON haulage_db.* TO haulage_db@localhost;"
-	sudo mysql -e "FLUSH PRIVILEGES;"
-	# import test database
-	mysql -u haulage_db -phaulage_db haulage_db < /tmp/haulage_sampledb.sql
-	echo "created Haulage Database"
-	rm -rf /tmp/haulage_sampledb.sql
+### ONLY create the database if it doesn't already exist!
+if [[ $(sudo -u postgres psql -c "\l haulage_db;" -At) ]]; then
+	echo "warning: haulage_db already exists. Not updating the DB, just to be safe..."
 else
-	echo "warning: haulage_db already exists even though debian package was not installed? Not changing anything, just to be safe..."
+	# create haulage_db user and database
+	sudo -u postgres psql -c "CREATE DATABASE haulage_db;"
+	sudo -u postgres psql -c "CREATE ROLE haulage_db WITH LOGIN ENCRYPTED PASSWORD 'haulage_db';"
+	sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE haulage_db TO haulage_db;"
+	echo "created haulage database and local user"
+	haulage --db-upgrade
 fi
 
 systemctl daemon-reload
+systemctl restart haulage.service
+
 echo "Installed haulage"
