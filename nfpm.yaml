@@ -103,9 +103,9 @@ empty_folders:
 # Scripts to run at specific stages. (overridable)
 scripts:
   # preinstall: ./scripts/preinstall.sh
-  postinstall: ./init/postinst
-  preremove: ./init/preremove.sh
-  postremove: ./init/postrm
+  postinstall: ./pkg/scripts/postinst.sh
+  preremove: ./pkg/scripts/prerm.sh
+  postremove: ./pkg/scripts/postrm.sh
 
 # Custom configuration applied only to the Deb packager.
 deb:
