@@ -58,7 +58,7 @@ def main(workspace_path):
         image_name = "haulage/{}-build-local".format(distro)
         _build_docker_image(
             workspace_path,
-            Path("pkg/Dockerfile-{}".format(distro)),
+            Path("pkg/crossplatform/Dockerfile-{}".format(distro)),
             image_tag=image_name,
         )
         _run_dockerized_build(workspace_path, image_tag=image_name)
