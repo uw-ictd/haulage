@@ -72,8 +72,10 @@ contents:
   - src: "./target/${HOST_ARCHITECTURE}/release/haulage"
     dst: "/usr/bin/haulage"
 
-  - src: "./init/haulagedb.py"
+  - src: "./python/haulagedb.py"
     dst: "/usr/bin/haulagedb"
+    file_info:
+      mode: 0755
 
   - src: "./python/migrate_mysql_to_pg.py"
     dst: "/usr/bin/haulage-pg-migrate"
