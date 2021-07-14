@@ -75,6 +75,11 @@ contents:
   - src: "./init/haulagedb.py"
     dst: "/usr/bin/haulagedb"
 
+  - src: "./python/migrate_mysql_to_pg.py"
+    dst: "/usr/bin/haulage-pg-migrate"
+    file_info:
+      mode: 0755
+
   - src: "./haulage/migrations"
     dst: "/usr/share/haulage/migrations"
 
