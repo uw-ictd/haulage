@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 
-import MySQLdb
-import os
 import sys
 import decimal
 import yaml
 
+import psycopg2
+
 
 def display_help():
     print("COMMANDS:")
-    print("   add {imsi msisdn ip}: adds a user to the network")
+    print("   add {imsi msisdn ip [currency_code]}: adds a user to the network")
     print("   remove {imsi}: removes a user from the network")
     print("   topup {imsi} {bytes}: adds bytes to a user's account")
     print("   help: displays this message and exits")
@@ -30,26 +30,22 @@ if command == "help":
     display_help()
     exit(0)
 
-if os.geteuid() != 0:
-    print("haulagedb: Must run as root!")
-    exit(1)
+with open("/etc/haulage/config.yml") as f:
+    conf = yaml.load(f, Loader=yaml.SafeLoader)
+    dbname = conf["custom"]["dbLocation"]
+    db_user = conf["custom"]["dbUser"]
+    db_pass = conf["custom"]["dbPass"]
 
-file = open("/etc/haulage/config.yml")
-conf = yaml.load(file, Loader=yaml.BaseLoader)
-dbname = conf["custom"]["dbLocation"]
-db_user = conf["custom"]["dbUser"]
-db_pass = conf["custom"]["dbPass"]
-
-db = MySQLdb.connect(host="localhost", user=db_user, passwd=db_pass, db=dbname)
+db = psycopg2.connect(host="localhost", user=db_user, password=db_pass, dbname=dbname)
 cursor = db.cursor()
 
 #########################################################################
 ############### OPTION ONE: ADD A USER TO THE DATABASE ##################
 #########################################################################
 if command == "add":
-    if len(sys.argv) != 5:
+    if (len(sys.argv) < 5) or (len(sys.argv) > 6):
         print(
-            'haulagedb: incorrect number of args, format is "haulagedb add imsi msisdn ip"'
+            'haulagedb: incorrect number of args, format is "haulagedb add imsi msisdn ip [currency_code]"'
         )
         exit(1)
 
@@ -57,18 +53,43 @@ if command == "add":
     msisdn = sys.argv[3]
     ip = sys.argv[4]
 
+    if len(sys.argv) > 5:
+        currency = sys.argv[5]
+    else:
+        currency = "IDR"
+
     # TODO: error-handling? Check if imsi/msisdn/ip already in system?
     print("haulagedb: adding user " + str(imsi))
 
-    commit_str = (
-        "INSERT INTO customers (imsi, msisdn) VALUES ('" + imsi + "', '" + msisdn + "')"
+    cursor.execute("BEGIN TRANSACTION")
+
+    cursor.execute(
+        """
+        SELECT id FROM currencies WHERE code=%s
+        """,
+        [currency],
     )
-    cursor.execute(commit_str)
+    currency_ids = cursor.fetchall()
+    if len(currency_ids) != 1:
+        raise RuntimeError(
+            "Invalid currency code {}, try one like IDR or USD".format(currency)
+        )
+
+    cursor.execute(
+        """
+        INSERT INTO subscribers (imsi, currency)
+        VALUES
+        (%s, %s)
+        """,
+        [imsi, currency_ids[0][0]],
+    )
 
     commit_str = (
         "INSERT INTO static_ips (imsi, ip) VALUES ('" + imsi + "', '" + ip + "')"
     )
     cursor.execute(commit_str)
+
+    cursor.execute("COMMIT")
 
 #########################################################################
 ############### OPTION TWO: REMOVE USER FROM THE DATABASE ###############
@@ -82,11 +103,36 @@ elif command == "remove":
 
     print("haulagedb: removing user " + str(imsi))
 
-    commit_str = "DELETE FROM customers WHERE imsi = " + imsi
-    cursor.execute(commit_str)
+    cursor.execute("BEGIN TRANSACTION")
 
-    commit_str = "DELETE FROM static_ips WHERE imsi = " + imsi
-    cursor.execute(commit_str)
+    cursor.execute(
+        """
+        DELETE FROM static_ips
+        WHERE imsi=%s
+        """,
+        [imsi],
+    )
+
+    cursor.execute(
+        """
+        DELETE FROM subscriber_history
+        WHERE subscriber IN (
+            SELECT internal_uid
+            FROM subscribers
+            WHERE imsi=%s
+        )
+        """,
+        [imsi],
+    )
+
+    cursor.execute(
+        """
+        DELETE FROM subscribers WHERE imsi=%s
+        """,
+        [imsi],
+    )
+
+    cursor.execute("COMMIT")
 
 #########################################################################
 ############### OPTION THREE: TOPUP (ADD BALANCE TO USER) ###############
@@ -103,11 +149,18 @@ elif command == "topup":
     old_balance = 0
     new_balance = 0
 
+    cursor.execute("BEGIN TRANSACTION")
+
     # STEP ONE: query information
-    commit_str = (
-        "SELECT data_balance FROM customers WHERE imsi = " + imsi + " FOR UPDATE"
+    numrows = cursor.execute(
+        """
+        SELECT data_balance, internal_uid
+        FROM subscribers
+        WHERE imsi=%s
+        FOR UPDATE
+        """,
+        [imsi],
     )
-    numrows = cursor.execute(commit_str)
     if numrows == 0:
         print("haulagedb error: imsi " + str(imsi) + " does not exist!")
         exit()
@@ -137,15 +190,36 @@ elif command == "topup":
                 + " setting new data_balance to "
                 + str(new_balance)
             )
-            commit_str = (
-                "UPDATE customers SET data_balance = "
-                + str(new_balance)
-                + " WHERE imsi = "
-                + imsi
+            cursor.execute(
+                """
+                UPDATE subscribers
+                SET data_balance = %s
+                WHERE imsi = %s
+                RETURNING internal_uid, data_balance, balance, bridged
+                """,
+                [new_balance, imsi],
             )
-            cursor.execute(commit_str)
+            new_sub_state = cursor.fetchall()
+            if len(new_sub_state) != 1:
+                raise RuntimeError("Database state invalid, too many records updated")
+            new_sub_state = new_sub_state[0]
+            cursor.execute(
+                """
+                INSERT INTO subscriber_history(subscriber, time, data_balance, balance, bridged)
+                VALUES
+                (%s, CURRENT_TIMESTAMP, %s, %s, %s)
+                """,
+                [
+                    new_sub_state[0],
+                    new_sub_state[1],
+                    new_sub_state[2],
+                    new_sub_state[3],
+                ],
+            )
+            cursor.execute("COMMIT")
             break
         if answer == "n" or answer == "N":
+            cursor.execute("ROLLBACK")
             print("haulagedb: cancelling topup operation\n")
             break
 
