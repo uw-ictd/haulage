@@ -1,4 +1,5 @@
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](LICENSE)
+![Build CI](https://github.com/uw-ictd/haulage/actions/workflows/main.yml/badge.svg)
 
 | UPDATE: I've recently completed a major overhaul of haulage to better support long-term maintenance, system upgrades, and integration with other front-ends besides CoLTE. As part of this change we've re-written the haulage core in rust instead of golang, and the low-level details have changed substantially. If you're upgrading an existing system, be sure to checkout the Upgrading section below : ) -Matt J. |
 |---|
