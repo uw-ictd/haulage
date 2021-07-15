@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "haulage-python"
+version = "0.2.0"
+description = "Python tools supporting the haulage project."
+authors = ["Matt Johnson <matt9j@cs.washington.edu>"]
+license = "MPL-2.0"
+
+[tool.poetry.dependencies]
+python = "^3.6"
+mysql-connector = "*"
+pyyaml = "*"
+psycopg2 = "^2.9"
+
+[tool.poetry.dev-dependencies]
+black = "*"
+pylint = "*"
+rope = "*"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

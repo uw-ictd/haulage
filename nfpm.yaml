@@ -1,5 +1,5 @@
 name: "haulage"
-arch: "${HOST_ARCHITECTURE}"
+arch: "${DEB_ARCHITECTURE}"
 platform: "linux"
 
 # Upstream Version. (required)
@@ -47,10 +47,9 @@ provides:
 
 # Dependencies. (overridable)
 depends:
-  - "libpcap0.8"
+  - "postgresql"
   - "python3"
-  - "default-mysql-client"
-  - "default-mysql-server"
+  - "python3-psycopg2"
   - "python3-yaml"
   - "python3-mysqldb"
 
@@ -70,14 +69,21 @@ conflicts:
 # This can be binaries or any other files.
 contents:
   # Basic files that applies to all packagers
-  - src: "./build/${HOST_ARCHITECTURE}/haulage"
+  - src: "./target/${HOST_ARCHITECTURE}/release/haulage"
     dst: "/usr/bin/haulage"
 
-  - src: "./init/haulagedb.py"
+  - src: "./python/haulagedb.py"
     dst: "/usr/bin/haulagedb"
+    file_info:
+      mode: 0755
 
-  - src: "./haulage.sql"
-    dst: "/etc/haulage/haulage_sampledb.sql"
+  - src: "./python/migrate_mysql_to_pg.py"
+    dst: "/usr/bin/haulage-pg-migrate"
+    file_info:
+      mode: 0755
+
+  - src: "./haulage/migrations"
+    dst: "/usr/share/haulage/migrations"
 
   - src: "./init/haulage.service"
     dst: "/lib/systemd/system/haulage.service"
@@ -104,9 +110,9 @@ empty_folders:
 # Scripts to run at specific stages. (overridable)
 scripts:
   # preinstall: ./scripts/preinstall.sh
-  postinstall: ./init/postinst
-  # preremove: ./scripts/preremove.sh
-  postremove: ./init/postrm
+  postinstall: ./pkg/scripts/postinst.sh
+  preremove: ./pkg/scripts/prerm.sh
+  postremove: ./pkg/scripts/postrm.sh
 
 # Custom configuration applied only to the Deb packager.
 deb:

@@ -1,0 +1,6 @@
+# Ignore the build directory with already generated packages.
+/build
+
+# Ignore the local target directory, containing rust build products for the host system.
+/target
+

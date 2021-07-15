@@ -1,13 +1,11 @@
-[![Go Report Card](https://goreportcard.com/badge/github.com/uw-ictd/haulage)](https://goreportcard.com/report/github.com/uw-ictd/haulage)
-[![Build Status](https://travis-ci.org/uw-ictd/haulage.svg?branch=master)](https://travis-ci.org/uw-ictd/haulage)
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](LICENSE)
 
-| UPDATE: Our team recently ported EPC codebases from OAI to open5gs! Per all of our tests, this release should work well, but we encourage you to test-drive it and report any bugs - Spencer, 27 March 2020. |
-| --- |
+| UPDATE: I've recently completed a major overhaul of haulage to better support long-term maintenance, system upgrades, and integration with other front-ends besides CoLTE. As part of this change we've re-written the haulage core in rust instead of golang, and the low-level details have changed substantially. If you're upgrading an existing system, be sure to checkout the Upgrading section below : ) -Matt J. |
+|---|
 
 # haulage
-A golang tool for measuring, logging, and controlling network usage to
-allow billing and analysis.
+A tool for measuring, logging, and controlling network usage to allow billing
+and analysis.
 
 >haul·age
 >
@@ -28,31 +26,98 @@ allow billing and analysis.
   more fully featured) tools may be overkill.
 
 # Usage
-## Install from source with go
- 1) Install the go tools (version >= 1.11) for your platform, available from
-    [golang.org](https://golang.org/doc/install)
- 2) Install the libpcap library and headers (on debian flavors `apt-get install libpcap-dev`)
- 3) `go get github.com/uw-ictd/haulage`
- 
-As an alternative to (3), you could also clone this repo and then `make build`
-
 ## Binary releases
-We currently host/maintain .deb packages for Ubuntu 18.04 and Debian 9. Use
-the following script to add our repo and install haulage.
+We currently host/maintain .deb packages for Ubuntu 18.04, Ubuntu 20.04, and
+Debian 10 as part of the [CoLTE project](https://github.com/uw-ictd/colte). You
+can use the following script to add the colte repo and install haulage.
 ```
-echo "deb http://colte.cs.washington.edu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/colte.list
-sudo wget -O /etc/apt/trusted.gpg.d/colte.gpg http://colte.cs.washington.edu/keyring.gpg
-sudo apt-get update
-sudo apt-get install haulage
+echo "deb [signed-by=/usr/share/keyrings/colte-archive-keyring.gpg] http://colte.cs.washington.edu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/colte.list
+sudo wget -O /usr/share/keyrings/colte-archive-keyring.gpg http://colte.cs.washington.edu/colte-archive-keyring.gpg
+sudo apt update
+sudo apt install haulage
 ```
-### Building your own binary
- 1) Download and install [fpm](https://github.com/jordansissel/fpm) for your
-    platform.
- 2) Build a binary package with `make package`.
-
 ## Configuration
-All haulage configurations are located in config.yml. If you installed
-our .deb package, this file is located in /etc/haulage.
+All haulage configurations are located in config.yml. If you installed via the
+.deb package, this file is located at /etc/haulage/config.yml.
+
+Importantly, this file determines which network interface haulage should
+monitor, and haulage will fail to start if you have not set it to a valid
+interface for your deployment system.
+
+### Database
+Haulage relies on a backing Postgres database to store durable state
+information. The package installation scripts assume the postgresql database
+server is installed with default parameters, and will create a basic empty
+`haulage_db` database with a `haulage_db` user authorized for access. If your
+deployment environment uses an external database, you will need to manually
+configure the database parameters in the haulage config file and then run
+`haulage --db-upgrade` to update the database to the required schema.
+
+The installation script will not overwrite an existing haulage_db database to
+prevent unintentional data loss, so if you remove or reinstall the package
+without using apt purge, you may need to manually drop this database.
+
+## Administration
+The deb package installs a systemd service `haulage.service` but does not
+automatically start or enable it on installation. If you would like to
+automatically run haulage on startup, use systemctl to start and enable the
+service.
+```
+# Starts haulage running
+sudo systemctl start haulage.service
+# Enables haulage to start automatically on system startup/restart
+sudo systemctl enable haulage.service
+```
+If you are using the systemd service, logs are available in the journal, and can
+be accessed with the usual journalctl commands. `sudo journalctl -u
+haulage.service -f` will open a streaming view of the current log.
+
+# Upgrading from haulage 0.0.*
+
+Prior versions of haulage used MySQL/Mariadb instead of Postgres, with a
+different database schema. The package installs a migration script which can be
+manually run to migrate an existing install to the new schema.
+
+Before running it, be sure to configure your /etc/haulage/config.yml file with
+the database login credentials *for the new installation*, and make sure both
+databases are up. You will specify the legacy database credentials on the
+command line for the migration script.
+
+As an example, to migrate an existing default installation
+(mariadb://haulage_db:haulage_db@localhost/haulage_db) after upgrading haulage
+to 0.2.*, run
+```
+haulage-pg-migrate -c /etc/haulage/config.yml --currency USD \
+--mysql-db-name haulage_db --mysql-db-user haulage_db --mysql-db-pass haulage_db
+```
+
+This script is availabe in the source repo at if you need to customize it for
+your deployment
+https://github.com/uw-ictd/haulage/tree/main/python/migrate_mysql_to_pg.py
+
+# Building from source
+
+If you would like to build from source, you will need rust stable 1.53.0 or
+newer. See
+[https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
+for instructions. Once you have rust installed, you can build a debug binary for
+your local architecture with cargo (`cargo build`), or a fully optimized release
+binary with (`cargo build --release`). The built binaries will be availabe in
+the target directory. The project uses a cargo workspace, with individual crates
+in subdirectories. Checkout the root Cargo.toml file to see the specific
+locations of each component.
+
+We provide a makefile for locally building the release binary and deb packages
+which can be run with `make`. This makefile has not been extensively tested
+outside our own CI pipeline, so if you encounter issues please reach out!
+
+The `pkg/crossplatform` directory also contains infrastructure for building
+packages for all supported platforms in isolated docker environments. To build
+binaries appropriate for all platforms, run `python3
+pkg/crossplatform/build_all.py` *from the root directory of the repo*. Your
+local user will need to have docker priviliges and the docker daemon will need
+to be installed and running. The built packages will be available in the
+``build/`` directory.
 
 # Developing
 haulage is an open source project, and participation is always
