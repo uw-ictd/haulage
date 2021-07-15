@@ -23,7 +23,7 @@ TARGET_DIR=./target
 .PHONY: all build package \
 build_arm64 build_x86_64 build-clean \
 package_arm64 package_x86_64 package-clean \
-clean dist-clean quickstart_ubuntu get_nfpm
+clean dist-clean quickstart get_nfpm
 
 all: build package
 
@@ -71,11 +71,11 @@ dist-clean: clean
 	rm -rf $(TARGET_DIR)
 
 # Helper rules for installing build dependencies and tooling.
-quickstart_ubuntu:
-	wget https://sh.rustup.rs
+quickstart:
+	sudo apt-get -y install libsystemd-dev curl
+	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > sh.rustup.rs
 	sh sh.rustup.rs -y
-	sudo apt-get -y install libsystemd-dev
-	echo 'PATH=$$PATH:/usr/local/go/bin' >> ~/.profile
+	echo 'PATH=$$PATH:$$HOME/.cargo/bin' >> ~/.profile
 
 get_nfpm: $(TARGET_DIR)/nfpm/nfpm
 
