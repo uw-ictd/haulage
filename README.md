@@ -88,7 +88,7 @@ As an example, to migrate an existing default installation
 (mariadb://haulage_db:haulage_db@localhost/haulage_db) after upgrading haulage
 to 0.2.*, run
 ```
-haulage-pg-migrate -c /etc/haulage/config.yml --currency USD \
+haulage-pg-migrate -c /etc/haulage/config.yml \
 --mysql-db-name haulage_db --mysql-db-user haulage_db --mysql-db-pass haulage_db
 ```
 
