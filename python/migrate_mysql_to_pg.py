@@ -29,74 +29,7 @@ def read_haulage_config(config_path):
     return (db_name, db_user, db_pass)
 
 
-def canonicalize_currency(code, symbol, name, pg_conn):
-    # Check if the code is already registered
-    code = code.upper()
-    cursor = pg_conn.cursor()
-
-    cursor.execute(
-        """
-        SELECT id, name, code, symbol
-        FROM currencies
-        WHERE code=%s;
-        """,
-        [code],
-    )
-
-    rows = cursor.fetchall()
-
-    if len(rows) == 0:
-        # Insert the new currency
-        cursor.execute(
-            """
-            INSERT INTO currencies("name", "code", "symbol")
-            VALUES
-            (%s, %s, %s)
-            """,
-            [name, code, symbol],
-        )
-
-        cursor.execute(
-            """
-            SELECT id, name, code, symbol
-            FROM currencies
-            WHERE code=%s;
-            """,
-            [code],
-        )
-        inserted_id = cursor.fetchall()
-        if len(inserted_id != 1):
-            raise RuntimeError(
-                "The just inserted currency code didn't match exactly one row, which should never happen."
-            )
-
-        return inserted_id[0][0]
-
-    elif len(rows) == 1:
-        # There was a single match, assert that the other parts match
-        if (name is not None and rows[0][1] != name) or (
-            symbol is not None and rows[0][3] != symbol
-        ):
-            logging.error(
-                "Could not set the currency because the provided name and symbol do not match those of an existing currency already inserted at the same code"
-            )
-            logging.error("You attempted to insert %s, %s, %s", code, name, symbol)
-            logging.error(
-                "Which conflicts with the existing %s, %s, %s",
-                rows[0][2],
-                rows[0][1],
-                rows[0][3],
-            )
-            raise RuntimeError("Cannot proceed with a currency conflict")
-
-        return rows[0][0]
-    else:
-        raise RuntimeError(
-            "The provided currency code matches multiple rows, which should never happen."
-        )
-
-
-def migrate_subscribers(mysql_conn, pg_conn, currency_id):
+def migrate_subscribers(mysql_conn, pg_conn):
     mysql_conn.start_transaction(isolation_level="SERIALIZABLE")
     mysql_cursor = mysql_conn.cursor()
     pg_cursor = pg_conn.cursor()
@@ -110,15 +43,15 @@ def migrate_subscribers(mysql_conn, pg_conn, currency_id):
         else:
             bridged = False
 
-        new_sub_row = [row[0], row[4], row[5], currency_id, bridged]
+        new_sub_row = [row[0], row[4], bridged]
 
         try:
             pg_cursor.execute("BEGIN TRANSACTION")
             pg_cursor.execute(
                 """
-                INSERT INTO subscribers("imsi", "data_balance", "balance", "currency", "bridged")
+                INSERT INTO subscribers("imsi", "data_balance", "bridged")
                 VALUES
-                (%s, %s, %s, %s, %s)""",
+                (%s, %s, %s)""",
                 new_sub_row,
             )
             logging.debug(
@@ -195,20 +128,6 @@ if __name__ == "__main__":
         help="The database password for the mysql data source, assumed the same as provided in the configuration file unless proveded.",
     )
     parser.add_argument(
-        "--currency",
-        required=True,
-        help="The three character ISO 4217 currency code of the balance currency used by the legacy database",
-    )
-    parser.add_argument(
-        "--currency-symbol",
-        help="The currency symbol for the currency used by the legacy database",
-    )
-    parser.add_argument(
-        "--currency-name",
-        help="The plain name of the currency used by the legacy database",
-    )
-
-    parser.add_argument(
         "-c",
         "--config",
         default=Path("/etc/haulage/config.yml"),
@@ -243,8 +162,5 @@ if __name__ == "__main__":
     logging.info("Connected to postgres at db=%s, user=%s", pg_name, pg_user)
 
     logging.info("Beginning migration!")
-    legacy_currency_id = canonicalize_currency(
-        args.currency, args.currency_symbol, args.currency_name, pg_connection
-    )
-    migrate_subscribers(mysql_connection, pg_connection, legacy_currency_id)
+    migrate_subscribers(mysql_connection, pg_connection)
     migrate_static_ips(mysql_connection, pg_connection)
