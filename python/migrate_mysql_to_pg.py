@@ -7,7 +7,6 @@ from pathlib import Path
 
 import MySQLdb
 import psycopg2
-import psycopg2.errors
 import yaml
 
 logging.basicConfig(level=logging.DEBUG)
@@ -60,9 +59,9 @@ def migrate_subscribers(mysql_conn, pg_conn):
                 new_sub_row,
             )
             pg_cursor.execute("COMMIT")
-        except psycopg2.errors.UniqueViolation as e:
+        except psycopg2.IntegrityError as e:
             logging.warning(
-                "Skipping insert subscriber %s due to uniqueness error: %s ",
+                "Skipping insert subscriber %s due to error: %s ",
                 new_sub_row,
                 e,
             )
@@ -98,9 +97,9 @@ def migrate_static_ips(mysql_conn, pg_conn):
                 imsi,
             )
             pg_cursor.execute("COMMIT")
-        except psycopg2.errors.UniqueViolation as e:
+        except psycopg2.IntegrityError as e:
             logging.warning(
-                "Skipping insert static ip %s for imsi %s due to uniqueness error: %s",
+                "Skipping insert static ip %s for imsi %s due to error: %s",
                 ip,
                 imsi,
                 e,
@@ -153,7 +152,7 @@ if __name__ == "__main__":
     if mysql_pass is None:
         mysql_pass = config_db_pass
 
-    mysql_connection = mysql.connector.connect(
+    mysql_connection = MySQLdb.connect(
         host="localhost", user=mysql_user, passwd=mysql_pass, db=mysql_name
     )
     logging.info("Connected to mysql/mariadb at db=%s, user=%s", mysql_name, mysql_user)
