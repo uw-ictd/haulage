@@ -5,7 +5,7 @@ import logging
 
 from pathlib import Path
 
-import mysql.connector
+import MySQLdb
 import psycopg2
 import psycopg2.errors
 import yaml
@@ -30,8 +30,8 @@ def read_haulage_config(config_path):
 
 
 def migrate_subscribers(mysql_conn, pg_conn):
-    mysql_conn.start_transaction(isolation_level="SERIALIZABLE")
     mysql_cursor = mysql_conn.cursor()
+    mysql_cursor.execute("BEGIN")
     pg_cursor = pg_conn.cursor()
 
     mysql_cursor.execute(
@@ -73,8 +73,8 @@ def migrate_subscribers(mysql_conn, pg_conn):
 
 
 def migrate_static_ips(mysql_conn, pg_conn):
-    mysql_conn.start_transaction(isolation_level="SERIALIZABLE")
     mysql_cursor = mysql_conn.cursor()
+    mysql_cursor.execute("BEGIN")
     pg_cursor = pg_conn.cursor()
     pg_cursor.execute("BEGIN TRANSACTION")
 
