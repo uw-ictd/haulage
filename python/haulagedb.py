@@ -43,20 +43,12 @@ cursor = db.cursor()
 ############### OPTION ONE: ADD A USER TO THE DATABASE ##################
 #########################################################################
 if command == "add":
-    if (len(sys.argv) < 5) or (len(sys.argv) > 6):
-        print(
-            'haulagedb: incorrect number of args, format is "haulagedb add imsi msisdn ip [currency_code]"'
-        )
+    if len(sys.argv) != 4:
+        print('haulagedb: incorrect number of args, format is "haulagedb add imsi ip"')
         exit(1)
 
     imsi = sys.argv[2]
-    msisdn = sys.argv[3]
-    ip = sys.argv[4]
-
-    if len(sys.argv) > 5:
-        currency = sys.argv[5]
-    else:
-        currency = "IDR"
+    ip = sys.argv[3]
 
     # TODO: error-handling? Check if imsi/msisdn/ip already in system?
     print("haulagedb: adding user " + str(imsi))
@@ -65,23 +57,11 @@ if command == "add":
 
     cursor.execute(
         """
-        SELECT id FROM currencies WHERE code=%s
-        """,
-        [currency],
-    )
-    currency_ids = cursor.fetchall()
-    if len(currency_ids) != 1:
-        raise RuntimeError(
-            "Invalid currency code {}, try one like IDR or USD".format(currency)
-        )
-
-    cursor.execute(
-        """
-        INSERT INTO subscribers (imsi, currency)
+        INSERT INTO subscribers (imsi)
         VALUES
-        (%s, %s)
+        (%s)
         """,
-        [imsi, currency_ids[0][0]],
+        [imsi],
     )
 
     commit_str = (
@@ -195,7 +175,7 @@ elif command == "topup":
                 UPDATE subscribers
                 SET data_balance = %s
                 WHERE imsi = %s
-                RETURNING internal_uid, data_balance, balance, bridged
+                RETURNING internal_uid, data_balance, bridged
                 """,
                 [new_balance, imsi],
             )
@@ -205,15 +185,14 @@ elif command == "topup":
             new_sub_state = new_sub_state[0]
             cursor.execute(
                 """
-                INSERT INTO subscriber_history(subscriber, time, data_balance, balance, bridged)
+                INSERT INTO subscriber_history(subscriber, time, data_balance, bridged)
                 VALUES
-                (%s, CURRENT_TIMESTAMP, %s, %s, %s)
+                (%s, CURRENT_TIMESTAMP, %s, %s)
                 """,
                 [
                     new_sub_state[0],
                     new_sub_state[1],
                     new_sub_state[2],
-                    new_sub_state[3],
                 ],
             )
             cursor.execute("COMMIT")
