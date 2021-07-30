@@ -36,7 +36,7 @@ with open("/etc/haulage/config.yml") as f:
     db_user = conf["custom"]["dbUser"]
     db_pass = conf["custom"]["dbPass"]
 
-db = psycopg2.connect(host="localhost", user=db_user, password=db_pass, dbname=dbname)
+db = psycopg2.connect(host="127.0.0.1", user=db_user, password=db_pass, dbname=dbname)
 cursor = db.cursor()
 
 #########################################################################
