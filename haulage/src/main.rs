@@ -317,15 +317,17 @@ async fn main() {
                 let channel = user_aggregator.clone_input_channel();
                 let enforcer_channel = user_accounter.clone_input_channel();
                 let config = config.clone();
+
+                let packet_kind = match interface.mac {
+                    Some(_) => PacketKind::Ethernet(packet_data_copy),
+                    None => {
+                        // TODO Distinguish between IPv4 and IPv6... maybe by checking the checksums?
+                        PacketKind::IPv4(packet_data_copy)
+                    }
+                };
+
                 tokio::task::spawn(async move {
-                    handle_packet(
-                        packet_data_copy,
-                        channel,
-                        enforcer_channel,
-                        config,
-                        packet_log,
-                    )
-                    .await;
+                    handle_packet(packet_kind, channel, enforcer_channel, config, packet_log).await;
                 });
             }
             Err(e) => {
@@ -336,13 +338,19 @@ async fn main() {
 }
 
 async fn handle_packet<'a>(
-    packet: bytes::Bytes,
+    packet: PacketKind,
     user_agg_channel: tokio::sync::mpsc::Sender<async_aggregator::Message>,
     user_enforcer_channel: tokio::sync::mpsc::Sender<accounter::Message>,
     config: std::sync::Arc<config::Internal>,
     log: Logger,
 ) -> () {
-    match packet_parser::parse_ethernet(packet, &log) {
+    let parsed_packet = match packet {
+        PacketKind::Ethernet(packet_bytes) => packet_parser::parse_ethernet(&packet_bytes, &log),
+        PacketKind::IPv4(packet_bytes) => packet_parser::parse_ipv4(&packet_bytes, &log),
+        PacketKind::IPv6(packet_bytes) => packet_parser::parse_ipv6(&packet_bytes, &log),
+    };
+
+    match parsed_packet {
         Ok(packet_info) => {
             slog::debug!(log, "Received packet info {:?}", packet_info);
             let normalized_flow = normalize_address(
@@ -554,4 +562,10 @@ fn normalize_address(
     } else {
         return NormalizedFlow::Other(flow_fivetuple.clone(), bytes);
     }
+}
+
+enum PacketKind {
+    Ethernet(bytes::Bytes),
+    IPv4(bytes::Bytes),
+    IPv6(bytes::Bytes),
 }
