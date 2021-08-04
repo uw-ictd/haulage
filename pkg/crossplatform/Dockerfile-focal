@@ -5,7 +5,7 @@ FROM ubuntu:focal
 # different domains, without specifying that their repos are architecture
 # specific in the sources list :/
 RUN mv /etc/apt/sources.list /etc/apt/sources.list.original
-COPY ./pkg/cross-compile-sources-list-focal /etc/apt/sources.list
+COPY ./pkg/crossplatform/cross-compile-sources-list-focal /etc/apt/sources.list
 
 # Add required cross-compiler architectures
 RUN dpkg --add-architecture arm64
