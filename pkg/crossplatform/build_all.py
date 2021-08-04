@@ -28,7 +28,8 @@ def _setup_workspace(workspace_path):
 
 def _build_docker_image(base_build_path, dockerfile, image_tag):
     subprocess.run(
-        ["docker", "build", "-f", dockerfile, "--tag", image_tag, base_build_path]
+        ["docker", "build", "-f", dockerfile, "--tag", image_tag, base_build_path],
+        check=True,
     )
 
 
@@ -43,7 +44,8 @@ def _run_dockerized_build(workspace_path, image_tag):
             "{}:/build-volume".format(str(host_bind_path)),
             image_tag,
             str(os.getuid()),
-        ]
+        ],
+        check=True,
     )
 
 
