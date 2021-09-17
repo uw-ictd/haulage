@@ -10,11 +10,13 @@ python = "^3.6"
 mysqlclient = "^2.0.3"
 pyyaml = "*"
 psycopg2 = "^2.9"
+pymongo = "^3.12.0"
 
 [tool.poetry.dev-dependencies]
 black = "*"
 pylint = "*"
 rope = "*"
+pytest = "^6.2.5"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
