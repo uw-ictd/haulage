@@ -7,6 +7,7 @@ import logging
 
 from pathlib import Path
 
+import MySQLdb
 import pymongo
 import psycopg2
 import yaml
@@ -136,6 +137,65 @@ def remap_open5gs_ips(mongo_collection):
         print("Updated OK")
 
 
+def sync_balances(mysql_conn, pg_conn):
+    mysql_cursor = mysql_conn.cursor()
+    mysql_cursor.execute("BEGIN")
+    pg_cursor = pg_conn.cursor()
+
+    mysql_cursor.execute(
+        "select imsi, data_balance, balance, bridged, enabled from customers;"
+    )
+    for row in mysql_cursor:
+        if row[3] == 1:
+            bridged = True
+        else:
+            bridged = False
+
+        if row[4] == 1:
+            enabled = True
+        else:
+            enabled = False
+
+        try:
+            pg_cursor.execute("BEGIN TRANSACTION")
+            pg_cursor.execute(
+                """
+                UPDATE subscribers
+                SET ("data_balance", "bridged") = (%s, %s)
+                WHERE "imsi"=%s""",
+                [row[1], bridged, row[0]],
+            )
+            logging.debug(
+                "Updating subscriber data balance -> subscriber source row %s -> new balance and bridged %s",
+                row,
+                [row[1], bridged],
+            )
+            pg_cursor.execute(
+                """
+                UPDATE customers
+                SET ("balance", "enabled") = (%s, %s)
+                WHERE "imsi"=%s""",
+                [row[2], enabled, row[0]],
+            )
+            logging.debug(
+                "Updating subscriber balance -> subscriber source row %s -> new balance and enabled %s",
+                row,
+                [row[2], enabled],
+            )
+
+            pg_cursor.execute("COMMIT")
+        except psycopg2.IntegrityError as e:
+            logging.warning(
+                "Skipping update from original %s due to error: %s ",
+                row,
+                e,
+            )
+            pg_cursor.execute("ROLLBACK")
+
+    mysql_cursor.close()
+    mysql_conn.commit()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Programatically generate new static ip assignments."
@@ -179,3 +239,16 @@ if __name__ == "__main__":
         remap_static_ips(pg_connection)
         logging.info("Beginning open5gs mongo remapping!")
         remap_open5gs_ips(mongo_collection=mongo_database["subscribers"])
+
+    if args.sync_balances:
+        mysql_name = config_db_name
+        mysql_user = config_db_user
+        mysql_pass = config_db_pass
+
+        mysql_connection = MySQLdb.connect(
+            host="localhost", user=mysql_user, passwd=mysql_pass, db=mysql_name
+        )
+        logging.info(
+            "Connected to mysql/mariadb at db=%s, user=%s", mysql_name, mysql_user
+        )
+        sync_balances(mysql_connection, pg_connection)
