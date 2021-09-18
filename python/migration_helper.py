@@ -67,7 +67,7 @@ def remap_static_ips(pg_conn):
     pg_cursor = pg_conn.cursor()
     pg_cursor.execute("BEGIN TRANSACTION")
 
-    new_base = ipaddress.ip_address("10.45.1.0/16")
+    new_base = ipaddress.ip_interface("10.45.1.0/16")
 
     try:
         pg_cursor.execute("select imsi, ip from static_ips;")
@@ -111,7 +111,7 @@ def remap_static_ips(pg_conn):
 def remap_open5gs_ips(mongo_collection):
     """Remap all ip addresses in the open5gs db"""
 
-    new_base = ipaddress.ip_address("10.45.1.0/16")
+    new_base = ipaddress.ip_interface("10.45.1.0/16")
 
     for x in mongo_collection.find():
         imsi = x["imsi"]
