@@ -71,7 +71,7 @@ def remap_static_ips(pg_conn):
 
     try:
         pg_cursor.execute("select imsi, ip from static_ips;")
-        for row in pg_cursor:
+        for row in pg_cursor.fetchall():
             imsi = row[0]
             ip = row[1]
 
