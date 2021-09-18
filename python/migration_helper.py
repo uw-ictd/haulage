@@ -210,11 +210,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--remap-ips",
         help="Whether to remap ip addresses",
+        action="store_true",
     )
 
     parser.add_argument(
         "--sync-balances",
         help="Whether to remap ip addresses",
+        action="store_true",
     )
 
     args = parser.parse_args()
