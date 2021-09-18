@@ -219,6 +219,19 @@ if __name__ == "__main__":
         action="store_true",
     )
 
+    parser.add_argument(
+        "--mysql-db-name",
+        help="The database name for the mysql data source, assumed the same as provided in the configuration file unless proveded.",
+    )
+    parser.add_argument(
+        "--mysql-db-user",
+        help="The database user for the mysql data source, assumed the same as provided in the configuration file unless proveded.",
+    )
+    parser.add_argument(
+        "--mysql-db-pass",
+        help="The database password for the mysql data source, assumed the same as provided in the configuration file unless proveded.",
+    )
+
     args = parser.parse_args()
 
     (config_db_name, config_db_user, config_db_pass) = read_haulage_config(args.config)
@@ -243,9 +256,16 @@ if __name__ == "__main__":
         remap_open5gs_ips(mongo_collection=mongo_database["subscribers"])
 
     if args.sync_balances:
-        mysql_name = config_db_name
-        mysql_user = config_db_user
-        mysql_pass = config_db_pass
+        mysql_name = args.mysql_db_name
+        mysql_user = args.mysql_db_user
+        mysql_pass = args.mysql_db_pass
+
+        if mysql_name is None:
+            mysql_name = config_db_name
+        if mysql_user is None:
+            mysql_user = config_db_user
+        if mysql_pass is None:
+            mysql_pass = config_db_pass
 
         mysql_connection = MySQLdb.connect(
             host="localhost", user=mysql_user, passwd=mysql_pass, db=mysql_name
