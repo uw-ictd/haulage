@@ -89,7 +89,7 @@ def remap_static_ips(pg_conn):
                 SET "ip"=%s
                 WHERE "imsi"=%s
                 """,
-                [new_mapping.ip, new_mapping.imsi],
+                [str(new_mapping.ip), new_mapping.imsi],
             )
             logging.debug(
                 "Remapping static ip %s to %s for imsi %s",
