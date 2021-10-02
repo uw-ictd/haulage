@@ -12,4 +12,4 @@ rustflags = ["-L", "/usr/lib/aarch64-linux-gnu"]
 # their linker in a different place. (the location below works for Debian)
 
 # linker = "x86_64-linux-gnu-gcc"
-rustflags = ["-C", "target-cpu=haswell"]
+rustflags = ["-C", "target-feature=+sse,+sse2,+sse3,+ssse3"]
