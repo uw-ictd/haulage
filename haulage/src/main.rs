@@ -194,9 +194,9 @@ async fn main() {
     );
     let db_pool = std::sync::Arc::new(db_pool);
 
-    let migrator = sqlx::migrate::Migrator::new(opt.migration_directory)
+    let mut migrator = sqlx::migrate::Migrator::new(opt.migration_directory)
         .await
-        .expect("Unable to read available database schema migrationsa");
+        .expect("Unable to read available database schema migrations");
 
     // If requested, run any necessary database migrations
     if opt.migrate {
@@ -204,6 +204,7 @@ async fn main() {
             root_log,
             "Running database migrations, this process can not be easily undone!"
         );
+        migrator.set_ignore_missing(true);
         migrator.run(db_pool.as_ref()).await.unwrap();
         slog::info!(root_log, "Migrations complete, exiting haulage.");
 

@@ -1,0 +1,1 @@
+-- There is no down operation for this migration
