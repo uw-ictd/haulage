@@ -9,3 +9,4 @@ custom:
   dbLocation: "haulage_db"
   dbUser: "haulage_db"
   dbPass: "haulage_db"
+  dbAutoUpgrade: true

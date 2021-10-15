@@ -70,6 +70,7 @@ mod config {
         pub db_location: String,
         pub db_user: String,
         pub db_pass: String,
+        pub db_auto_upgrade: Option<bool>,
     }
 
     // An internal configuration structure used by the rest of the program that can
@@ -79,6 +80,7 @@ mod config {
         pub db_name: String,
         pub db_user: String,
         pub db_pass: String,
+        pub db_auto_upgrade: bool,
         pub flow_log_interval: std::time::Duration,
         pub user_log_interval: std::time::Duration,
         pub reenable_poll_interval: std::time::Duration,
@@ -140,6 +142,7 @@ async fn main() {
                 db_name: parsed_config.custom.db_location,
                 db_user: parsed_config.custom.db_user,
                 db_pass: parsed_config.custom.db_pass,
+                db_auto_upgrade: parsed_config.custom.db_auto_upgrade.unwrap_or(true),
                 flow_log_interval: parsed_config.flow_log_interval,
                 user_log_interval: parsed_config.user_log_interval,
                 reenable_poll_interval: parsed_config.custom.reenable_poll_interval,
