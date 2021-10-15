@@ -259,8 +259,7 @@ async fn main() {
         if extra_migrations.len() != 0 {
             slog::error!(
                 root_log,
-                "The following migrations are present in your database but unknown to this version of haulage!\n\
-                This cannot be fixed automatically, and you may need to re-create your database from scratch :/";
+                "The following migrations are present in your database but unknown to this version of haulage!";
                 "extra_migrations" => format!("{:?}", extra_migrations)
             );
         }
