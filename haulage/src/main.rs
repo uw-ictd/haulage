@@ -201,11 +201,12 @@ async fn main() {
         .await
         .expect("Unable to read available database schema migrations");
 
-    // If requested, run any necessary database migrations
+    // If requested to run a db-upgrade, run any necessary database migrations
+    // while ignoring missing migrations.
     if opt.migrate {
         slog::warn!(
             root_log,
-            "Running database migrations, this process can not be easily undone!"
+            "Running database migrations as part of explicit db-upgrade, this process can not be easily undone!"
         );
         migrator.set_ignore_missing(true);
         migrator.run(db_pool.as_ref()).await.unwrap();
@@ -229,7 +230,7 @@ async fn main() {
         .collect();
 
     if available_migrations != applied_migrations {
-        slog::error!(
+        slog::warn!(
             root_log,
             "There is a difference between the expected set of DB schema migrations for this version of haulage \
             and the migrations applied to the configured database."
@@ -241,13 +242,43 @@ async fn main() {
             .difference(&available_migrations)
             .collect();
 
+        // Print the list of unapplied migrations if any exist before checking for extra migrations.
         if unapplied_migrations.len() != 0 {
-            slog::error!(
+            slog::warn!(
                 root_log,
                 "The following migrations are expected by this version of haulage, but not applied to the local database";
                 "unapplied_migrations" => format!("{:?}", unapplied_migrations)
             );
-            if extra_migrations.len() == 0 {
+        }
+
+        // Extra migrations are possibly dangerous, and should require manual intervention & backup before upgrading.
+        if extra_migrations.len() != 0 {
+            slog::error!(
+                root_log,
+                "The following migrations are present in your database but unknown to this version of haulage!";
+                "extra_migrations" => format!("{:?}", extra_migrations)
+            );
+            slog::error!(
+                root_log,
+                "You can attempt to upgrade your database schema to be compatible with this version of haulage by manually running `haulage --db-upgrade`"
+            );
+            slog::error!(
+                root_log,
+                "***BE SURE TO BACK UP YOUR DATABASE BEFORE UPGRADING*** The upgrade operation cannot be easily undone."
+            );
+            slog::error!(
+                root_log,
+                "Cannot proceed without correcting the database schema."
+            );
+            return;
+        }
+
+        if unapplied_migrations.len() != 0 {
+            if !config.db_auto_upgrade {
+                slog::error!(
+                    root_log,
+                    "Unapplied migrations exist, but dbAutoUpgrade is disabled, exiting..."
+                );
                 slog::error!(
                     root_log,
                     "You can upgrade your database schema to be compatible with this version of haulage by manually running `haulage --db-upgrade`"
@@ -256,17 +287,18 @@ async fn main() {
                     root_log,
                     "***BE SURE TO BACK UP YOUR DATABASE BEFORE UPGRADING*** The upgrade operation cannot be easily undone."
                 );
+                return;
             }
-        }
 
-        if extra_migrations.len() != 0 {
-            slog::error!(
+            slog::warn!(
                 root_log,
-                "The following migrations are present in your database but unknown to this version of haulage!";
-                "extra_migrations" => format!("{:?}", extra_migrations)
+                "Running database migrations as part of dbAutoUpgrade, this process can not be easily undone!"
             );
+            migrator.run(db_pool.as_ref()).await.unwrap_or_else(
+                |e| slog::error!(root_log, "Failed to migrate with error {}", e)
+            );
+            slog::info!(root_log, "Migrations complete");
         }
-        panic!("Cannot proceed without correcting the database schema.");
     }
 
     // Create the main user aggregation, accounting, and enforcement subsystems.
