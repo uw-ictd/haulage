@@ -224,7 +224,10 @@ async fn main() {
         .expect("Unable to acquire DB connection")
         .list_applied_migrations()
         .await
-        .expect("Unable to query the applied DB schema migrations")
+        .unwrap_or_else(|e| {
+            slog::warn!(root_log, "Unable to query for applied migrations: {}", e);
+            vec![]
+        })
         .iter()
         .map(|x| x.version)
         .collect();
