@@ -70,6 +70,7 @@ mod config {
         pub db_location: String,
         pub db_user: String,
         pub db_pass: String,
+        pub db_auto_upgrade: Option<bool>,
     }
 
     // An internal configuration structure used by the rest of the program that can
@@ -79,6 +80,7 @@ mod config {
         pub db_name: String,
         pub db_user: String,
         pub db_pass: String,
+        pub db_auto_upgrade: bool,
         pub flow_log_interval: std::time::Duration,
         pub user_log_interval: std::time::Duration,
         pub reenable_poll_interval: std::time::Duration,
@@ -140,6 +142,7 @@ async fn main() {
                 db_name: parsed_config.custom.db_location,
                 db_user: parsed_config.custom.db_user,
                 db_pass: parsed_config.custom.db_pass,
+                db_auto_upgrade: parsed_config.custom.db_auto_upgrade.unwrap_or(true),
                 flow_log_interval: parsed_config.flow_log_interval,
                 user_log_interval: parsed_config.user_log_interval,
                 reenable_poll_interval: parsed_config.custom.reenable_poll_interval,
@@ -198,11 +201,12 @@ async fn main() {
         .await
         .expect("Unable to read available database schema migrations");
 
-    // If requested, run any necessary database migrations
+    // If requested to run a db-upgrade, run any necessary database migrations
+    // while ignoring missing migrations.
     if opt.migrate {
         slog::warn!(
             root_log,
-            "Running database migrations, this process can not be easily undone!"
+            "Running database migrations as part of explicit db-upgrade, this process can not be easily undone!"
         );
         migrator.set_ignore_missing(true);
         migrator.run(db_pool.as_ref()).await.unwrap();
@@ -220,13 +224,16 @@ async fn main() {
         .expect("Unable to acquire DB connection")
         .list_applied_migrations()
         .await
-        .expect("Unable to query the applied DB schema migrations")
+        .unwrap_or_else(|e| {
+            slog::warn!(root_log, "Unable to query for applied migrations: {}", e);
+            vec![]
+        })
         .iter()
         .map(|x| x.version)
         .collect();
 
     if available_migrations != applied_migrations {
-        slog::error!(
+        slog::warn!(
             root_log,
             "There is a difference between the expected set of DB schema migrations for this version of haulage \
             and the migrations applied to the configured database."
@@ -238,13 +245,43 @@ async fn main() {
             .difference(&available_migrations)
             .collect();
 
+        // Print the list of unapplied migrations if any exist before checking for extra migrations.
         if unapplied_migrations.len() != 0 {
-            slog::error!(
+            slog::warn!(
                 root_log,
                 "The following migrations are expected by this version of haulage, but not applied to the local database";
                 "unapplied_migrations" => format!("{:?}", unapplied_migrations)
             );
-            if extra_migrations.len() == 0 {
+        }
+
+        // Extra migrations are possibly dangerous, and should require manual intervention & backup before upgrading.
+        if extra_migrations.len() != 0 {
+            slog::error!(
+                root_log,
+                "The following migrations are present in your database but unknown to this version of haulage!";
+                "extra_migrations" => format!("{:?}", extra_migrations)
+            );
+            slog::error!(
+                root_log,
+                "You can attempt to upgrade your database schema to be compatible with this version of haulage by manually running `haulage --db-upgrade`"
+            );
+            slog::error!(
+                root_log,
+                "***BE SURE TO BACK UP YOUR DATABASE BEFORE UPGRADING*** The upgrade operation cannot be easily undone."
+            );
+            slog::error!(
+                root_log,
+                "Cannot proceed without correcting the database schema."
+            );
+            return;
+        }
+
+        if unapplied_migrations.len() != 0 {
+            if !config.db_auto_upgrade {
+                slog::error!(
+                    root_log,
+                    "Unapplied migrations exist, but dbAutoUpgrade is disabled, exiting..."
+                );
                 slog::error!(
                     root_log,
                     "You can upgrade your database schema to be compatible with this version of haulage by manually running `haulage --db-upgrade`"
@@ -253,17 +290,19 @@ async fn main() {
                     root_log,
                     "***BE SURE TO BACK UP YOUR DATABASE BEFORE UPGRADING*** The upgrade operation cannot be easily undone."
                 );
+                return;
             }
-        }
 
-        if extra_migrations.len() != 0 {
-            slog::error!(
+            slog::warn!(
                 root_log,
-                "The following migrations are present in your database but unknown to this version of haulage!";
-                "extra_migrations" => format!("{:?}", extra_migrations)
+                "Running database migrations as part of dbAutoUpgrade, this process can not be easily undone!"
             );
+            migrator.run(db_pool.as_ref()).await.unwrap_or_else(|e| {
+                slog::error!(root_log, "Failed to migrate with error {}", e);
+                panic!("Cannot continue with failed migrations");
+            });
+            slog::info!(root_log, "Migrations complete");
         }
-        panic!("Cannot proceed without correcting the database schema.");
     }
 
     // Create the main user aggregation, accounting, and enforcement subsystems.
@@ -295,7 +334,14 @@ async fn main() {
         .into_iter()
         .filter(interface_name_match)
         .next()
-        .unwrap(); // Consider adding better error logging here with unwrap_or_else
+        .unwrap_or_else(|| {
+            slog::error!(
+                root_log,
+                "Unable to find configured interface {}",
+                config.interface
+            );
+            panic!("No listenable interface found");
+        });
 
     // Create the receive channel
     let (_, mut rx) = match pnet_datalink::channel(&interface, Default::default()) {
