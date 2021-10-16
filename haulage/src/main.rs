@@ -294,9 +294,10 @@ async fn main() {
                 root_log,
                 "Running database migrations as part of dbAutoUpgrade, this process can not be easily undone!"
             );
-            migrator.run(db_pool.as_ref()).await.unwrap_or_else(
-                |e| slog::error!(root_log, "Failed to migrate with error {}", e)
-            );
+            migrator.run(db_pool.as_ref()).await.unwrap_or_else(|e| {
+                slog::error!(root_log, "Failed to migrate with error {}", e);
+                panic!("Cannot continue with failed migrations");
+            });
             slog::info!(root_log, "Migrations complete");
         }
     }
