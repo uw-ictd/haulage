@@ -331,7 +331,14 @@ async fn main() {
         .into_iter()
         .filter(interface_name_match)
         .next()
-        .unwrap(); // Consider adding better error logging here with unwrap_or_else
+        .unwrap_or_else(|| {
+            slog::error!(
+                root_log,
+                "Unable to find configured interface {}",
+                config.interface
+            );
+            panic!("No listenable interface found");
+        });
 
     // Create the receive channel
     let (_, mut rx) = match pnet_datalink::channel(&interface, Default::default()) {
