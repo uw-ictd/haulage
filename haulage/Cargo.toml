@@ -2,7 +2,7 @@
 name = "haulage"
 version = "0.2.7"
 authors = ["Matt Johnson <matt9j@cs.washington.edu>"]
-edition = "2018"
+edition = "2021"
 description = "A lightweight traffic measuring and logging application specialized for billing and analysis in small network deployments."
 license = "MPL-2.0"
 maintenance = "actively-developed"
