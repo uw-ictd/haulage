@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use thiserror::Error;
 
 pub use i32 as UserId;
@@ -14,6 +15,8 @@ pub enum EnforcementError {
     CommunicationError,
     #[error("Unknown Rate Limit policy id {0}")]
     RateLimitPolicyError(i32),
+    #[error("Failed to parse json: {0}")]
+    SerdeJsonError(#[from] serde_json::Error),
 }
 
 #[derive(Debug)]
@@ -25,13 +28,15 @@ pub struct Iptables {
 impl Iptables {
     pub fn new(
         poll_period: std::time::Duration,
+        interface: &str,
         db_pool: std::sync::Arc<sqlx::PgPool>,
         log: slog::Logger,
     ) -> Iptables {
         let (sender, receiver) = tokio::sync::mpsc::channel(64);
         let local_logger = log.clone();
+        let interface = interface.to_owned();
         let dispatch_handle = tokio::task::spawn(async move {
-            enforce_via_iptables(receiver, poll_period, db_pool, log).await;
+            enforce_via_iptables(receiver, poll_period, &interface, db_pool, log).await;
         });
         Iptables {
             dispatch_handle: dispatch_handle,
@@ -75,6 +80,7 @@ struct PolicyUpdateMessage {
 async fn enforce_via_iptables(
     mut chan: tokio::sync::mpsc::Receiver<PolicyUpdateMessage>,
     period: std::time::Duration,
+    interface: &str,
     db_pool: std::sync::Arc<sqlx::PgPool>,
     log: slog::Logger,
 ) -> () {
@@ -97,6 +103,9 @@ async fn enforce_via_iptables(
                 .unwrap();
         }
     }
+
+    // Clear any existing queuing disciplines on startup.
+    clear_interface_limit(interface, &log).await.unwrap();
 
     // TODO(matt9j) Setup the qdisc framework for rate limiting, ensuring to
     // clean up after an unclean prior exit if needed.
@@ -234,6 +243,84 @@ async fn set_forwarding_reject_rule(
     Ok(())
 }
 
+// A hacky fixup to remove the malformed options element from the token bucket
+// filter json output. This implementation assumes the input is ASCII, and that
+// the options element is never the first key in a givem object.
+fn delete_malformed_options_element(input: &str) -> String {
+    let mut output = String::new();
+    let mut i = input.find(r#","options":"#).unwrap_or(input.len());
+    let mut copy_begin_index: usize = 0;
+    while i < input.len() {
+        output.push_str(&input[copy_begin_index..i]);
+
+        // Find the matching close bracket by scanning the index without copying
+        let mut curly_count = 0;
+        while i < input.len() {
+            if input.as_bytes()[i] as char == '{' {
+                curly_count += 1;
+            }
+            if input.as_bytes()[i] as char == '}' {
+                curly_count -= 1;
+                if curly_count == 0 {
+                    i += 1;
+                    break;
+                }
+            }
+            i += 1;
+        }
+
+        if i >= input.len() {
+            break;
+        }
+        copy_begin_index = i;
+        i = input[copy_begin_index..]
+            .find(r#","options":"#)
+            .unwrap_or(input[copy_begin_index..].len())
+            + copy_begin_index;
+    }
+    // Handle any leftovers if needed
+    output.push_str(&input[copy_begin_index..i]);
+
+    output
+}
+
+async fn clear_interface_limit(iface: &str, log: &slog::Logger) -> Result<(), EnforcementError> {
+    slog::debug!(log, "About to clear interface config"; "interface" => iface);
+    let current_iface_status = tokio::process::Command::new("tc")
+        .args(&["-j", "qdisc", "show", "dev", iface])
+        .output()
+        .await?;
+
+    // Delete the options "key", which in debian Buster and earlier is not valid
+    // JSON for the tbf qdisc :(
+    let current_iface_status = delete_malformed_options_element(
+        std::str::from_utf8(&current_iface_status.stdout).unwrap(),
+    );
+    let current_iface_qdiscs: Vec<QDiscInfo> = serde_json::from_str(&current_iface_status)?;
+    if current_iface_qdiscs.len() > 1 {
+        slog::warn!(log, "Clearing non-trivial qdisc config");
+        for qdisc in current_iface_qdiscs {
+            if qdisc.root.unwrap_or(false) {
+                // Skip the root qdisc, which cannot be deleted.
+                continue;
+            }
+
+            slog::info!(log, "Clearing"; "kind" => qdisc.kind, "handle" => qdisc.handle);
+
+            let clear_status = tokio::process::Command::new("tc")
+                .args(&["qdisc", "del", "dev", iface, "root"])
+                .status()
+                .await?;
+
+            if !clear_status.success() {
+                slog::warn!(log, "qdisc clear failed");
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn update_bridged(
     db_pool: &sqlx::PgPool,
     id: UserId,
@@ -334,6 +421,13 @@ async fn query_reenabled_subscriber_bridge_state(
     Ok(rows)
 }
 
+#[derive(Debug, Deserialize)]
+struct QDiscInfo {
+    kind: String,
+    handle: String,
+    root: Option<bool>,
+}
+
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct SubscriberBridgeInfo {
     ip: ipnetwork::IpNetwork,
@@ -390,5 +484,17 @@ impl TryFrom<&SubscriberRateLimitRow> for SubscriberRateLimitInfo {
                 &row.dl_limit_policy_parameters,
             )?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_options_parse() {
+        let input = r#" [{"kind":"tbf","handle":"1:","root":true,"refcnt":2,"options":{rate 1Mbit burst 3840b lat 10.0ms }},{"kind":"qfq","handle":"2:","parent":"1:1","options":{}}]"#;
+        let desired_output = r#" [{"kind":"tbf","handle":"1:","root":true,"refcnt":2},{"kind":"qfq","handle":"2:","parent":"1:1"}]"#;
+        assert_eq!(delete_malformed_options_element(input), desired_output)
     }
 }

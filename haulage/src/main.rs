@@ -308,6 +308,7 @@ async fn main() {
     // Create the main user aggregation, accounting, and enforcement subsystems.
     let user_enforcer = enforcer::Iptables::new(
         config.reenable_poll_interval,
+        &config.interface,
         std::sync::Arc::clone(&db_pool),
         root_log.new(o!("subsystem" => "user_enforcer")),
     );
