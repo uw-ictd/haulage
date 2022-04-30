@@ -12,6 +12,8 @@ pub enum EnforcementError {
     IptablesError(#[from] std::io::Error),
     #[error("Lost communication with policy enforcer")]
     CommunicationError,
+    #[error("Unknown Rate Limit policy id {0}")]
+    RateLimitPolicyError(i32),
 }
 
 #[derive(Debug)]
@@ -96,6 +98,25 @@ async fn enforce_via_iptables(
         }
     }
 
+    // TODO(matt9j) Setup the qdisc framework for rate limiting, ensuring to
+    // clean up after an unclean prior exit if needed.
+    let current_db_state = query_all_subscriber_ratelimit_state(&db_pool, &log)
+        .await
+        .expect("Unable to get initial ratelimit state");
+    for sub in current_db_state {
+        match sub.ul_policy {
+            RateLimitPolicy::Unlimited => {
+                // TODO(matt9j) Ensure the ratelimit is not set for this sub
+            }
+        }
+
+        match sub.dl_policy {
+            RateLimitPolicy::Unlimited => {
+                // TODO(matt9j) Ensure the ratelimit is not set for this sub
+            }
+        }
+    }
+
     let mut timer = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
     loop {
         tokio::select! {
@@ -107,6 +128,7 @@ async fn enforce_via_iptables(
                         Vec::<SubscriberBridgeInfo>::new()
                     });
                 for sub in reenabled_subs {
+                    //TODO(matt9j) Check policy type
                     set_policy(sub.subscriber_id, Policy::Unlimited, &db_pool, &log)
                         .await
                         .unwrap_or_else(|e| {
@@ -169,6 +191,9 @@ async fn set_local_only_policy(
     let bridge_state = update_bridged(&db_pool, target, false, log).await?;
     set_forwarding_reject_rule(&bridge_state.ip.ip(), log).await
 }
+
+// TODO(matt9j) Add handlers for adding a user to ratelimiting, and removing a
+// user from rate-limiting in the overall filter tree.
 
 async fn delete_forwarding_reject_rule(
     ip: &std::net::IpAddr,
@@ -242,6 +267,32 @@ async fn update_bridged(
     Ok(user_state)
 }
 
+async fn query_all_subscriber_ratelimit_state(
+    db_pool: &sqlx::PgPool,
+    log: &slog::Logger,
+) -> Result<Vec<SubscriberRateLimitInfo>, EnforcementError> {
+    let mut transaction = db_pool.begin().await?;
+    slog::debug!(log, "Querying global ratelimit db state");
+
+    let ratelimit_state_query = r#"
+        SELECT "internal_uid" AS "subscriber_id", "ip", "ul_limit_policy", "dl_limit_policy", "ul_limit_policy_parameters", "dl_limit_policy_parameters"
+        FROM subscribers
+        INNER JOIN static_ips ON subscribers.imsi = static_ips.imsi
+    "#;
+
+    let rows: Vec<SubscriberRateLimitRow> = sqlx::query_as(ratelimit_state_query)
+        .fetch_all(&mut transaction)
+        .await?;
+
+    let mut parsed_ratelimits: Vec<SubscriberRateLimitInfo> = Vec::new();
+    for row in rows.iter() {
+        parsed_ratelimits.push(row.try_into()?)
+    }
+
+    transaction.commit().await?;
+    Ok(parsed_ratelimits)
+}
+
 async fn query_all_subscriber_bridge_state(
     db_pool: &sqlx::PgPool,
     log: &slog::Logger,
@@ -288,4 +339,56 @@ struct SubscriberBridgeInfo {
     ip: ipnetwork::IpNetwork,
     subscriber_id: i32,
     bridged: bool,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct SubscriberRateLimitRow {
+    ip: ipnetwork::IpNetwork,
+    subscriber_id: i32,
+    ul_limit_policy: i32,
+    dl_limit_policy: i32,
+    ul_limit_policy_parameters: String,
+    dl_limit_policy_parameters: String,
+}
+
+#[derive(Debug, Clone)]
+enum RateLimitPolicy {
+    Unlimited = 1,
+}
+
+#[derive(Debug, Clone)]
+struct SubscriberRateLimitInfo {
+    ip: ipnetwork::IpNetwork,
+    subscriber_id: i32,
+    ul_policy: RateLimitPolicy,
+    dl_policy: RateLimitPolicy,
+}
+
+fn create_policy_from_parameters(
+    policy_id: i32,
+    _parameters: &String,
+) -> Result<RateLimitPolicy, EnforcementError> {
+    match policy_id {
+        1 => Ok(RateLimitPolicy::Unlimited),
+        _ => Err(EnforcementError::RateLimitPolicyError(policy_id)),
+    }
+}
+
+impl TryFrom<&SubscriberRateLimitRow> for SubscriberRateLimitInfo {
+    type Error = EnforcementError;
+
+    fn try_from(row: &SubscriberRateLimitRow) -> Result<Self, Self::Error> {
+        Ok(SubscriberRateLimitInfo {
+            ip: row.ip,
+            subscriber_id: row.subscriber_id,
+            ul_policy: create_policy_from_parameters(
+                row.ul_limit_policy,
+                &row.ul_limit_policy_parameters,
+            )?,
+            dl_policy: create_policy_from_parameters(
+                row.dl_limit_policy,
+                &row.dl_limit_policy_parameters,
+            )?,
+        })
+    }
 }
