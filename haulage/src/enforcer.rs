@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use thiserror::Error;
+use std::collections::HashMap;
 
 pub use i32 as UserId;
 
@@ -84,6 +85,12 @@ async fn enforce_via_iptables(
     db_pool: std::sync::Arc<sqlx::PgPool>,
     log: slog::Logger,
 ) -> () {
+    // Issue handle ids to subscribers on a first-come first-serve basis. In
+    // this initial low-scale implementation don't try to reclaim IDs while
+    // operating.
+    let mut next_handle_id = 1;
+    let mut subscriber_limit_control_state = HashMap::<i32, SubscriberControlState>::new();
+
     // On startup synchronize the state in the database with the local iptables
     // rules. This is not very robust, and would be better integrated with
     // actual netfilter tables for efficiency and better control of the actual
@@ -93,6 +100,9 @@ async fn enforce_via_iptables(
         .expect("Unable to get initial desired iptables state!");
 
     for sub in current_db_state {
+        let sub_handle = format!("{:x}", next_handle_id).to_string();
+        next_handle_id += 1;
+        subscriber_limit_control_state.insert(sub.subscriber_id, SubscriberControlState { qdisc_handle: sub_handle, ip: sub.ip });
         if sub.bridged {
             delete_forwarding_reject_rule(&sub.ip.ip(), &log)
                 .await
@@ -107,21 +117,38 @@ async fn enforce_via_iptables(
     // Clear any existing queuing disciplines on startup.
     clear_interface_limit(interface, &log).await.unwrap();
 
-    // TODO(matt9j) Setup the qdisc framework for rate limiting, ensuring to
-    // clean up after an unclean prior exit if needed.
+    // Setup the root QFQ qdisc
+    setup_root_qdisc(interface, &log).await.unwrap();
+
     let current_db_state = query_all_subscriber_ratelimit_state(&db_pool, &log)
         .await
         .expect("Unable to get initial ratelimit state");
     for sub in current_db_state {
+        // TODO Match subscriber to control state
+        let sub_limit_state = subscriber_limit_control_state.get(&sub.subscriber_id);
+        let sub_limit_state = match sub_limit_state {
+            Some(state) => state,
+            None => {
+                let sub_handle = format!("{:x}", next_handle_id).to_string();
+                next_handle_id += 1;
+                subscriber_limit_control_state.insert(sub.subscriber_id, SubscriberControlState { qdisc_handle: sub_handle, ip: sub.ip });
+                subscriber_limit_control_state.get(&sub.subscriber_id).expect("Unable to retrieve key just inserted")
+            }
+        };
+
+        // Setup subscriber qfq class
+        setup_subscriber_class(interface, &sub_limit_state.qdisc_handle, &log).await.unwrap();
+        add_subscriber_dst_filter(interface, &sub_limit_state, &log).await.unwrap();
+
         match sub.ul_policy {
             RateLimitPolicy::Unlimited => {
-                // TODO(matt9j) Ensure the ratelimit is not set for this sub
+                // clear_user_limit(interface, &sub_limit_state.qdisc_handle, &log).await.unwrap();
             }
         }
 
         match sub.dl_policy {
             RateLimitPolicy::Unlimited => {
-                // TODO(matt9j) Ensure the ratelimit is not set for this sub
+                clear_user_limit(interface, &sub_limit_state.qdisc_handle, &log).await.unwrap();
             }
         }
     }
@@ -308,7 +335,7 @@ async fn clear_interface_limit(iface: &str, log: &slog::Logger) -> Result<(), En
             slog::info!(log, "Clearing"; "kind" => qdisc.kind, "handle" => qdisc.handle);
 
             let clear_status = tokio::process::Command::new("tc")
-                .args(&["qdisc", "del", "dev", iface, "root"])
+                .args(&["qdisc", "del", "dev", iface, "parent root"])
                 .status()
                 .await?;
 
@@ -316,6 +343,71 @@ async fn clear_interface_limit(iface: &str, log: &slog::Logger) -> Result<(), En
                 slog::warn!(log, "qdisc clear failed");
             }
         }
+    }
+
+    Ok(())
+}
+
+async fn setup_root_qdisc(iface: &str, log: &slog::Logger) -> Result<(), EnforcementError> {
+    slog::debug!(log, "About to setup root qdisc"; "interface" => iface);
+
+    let add_status = tokio::process::Command::new("tc")
+        .args(&["qdisc", "replace", "dev", iface, "parent", "root", "handle", "1:", "qfq" ])
+        .status()
+        .await?;
+
+    if !add_status.success() {
+        slog::warn!(log, "qdisc replace root with qfq failed");
+    }
+
+    Ok(())
+}
+
+async fn setup_subscriber_class(iface: &str, sub_handle_fragment: &str, log: &slog::Logger) -> Result<(), EnforcementError> {
+    slog::debug!(log, "About to add subscriber class to base qdisc"; "interface" => iface, "sub" => sub_handle_fragment);
+
+    let add_status = tokio::process::Command::new("tc")
+        .args(&["class", "replace", "dev", iface, "parent", "1:", "classid", &format!("1:{}", sub_handle_fragment).to_string(),
+         "qfq", "weight", "10" ])
+        .status()
+        .await?;
+
+    if !add_status.success() {
+        slog::warn!(log, "qfq add subscriber class failed");
+    }
+
+    Ok(())
+}
+
+async fn clear_user_limit(iface: &str, sub_handle: &str, log: &slog::Logger) -> Result<(), EnforcementError> {
+    slog::debug!(log, "About to clear sub"; "interface" => iface, "sub_handle" => sub_handle);
+
+    let add_status = tokio::process::Command::new("tc")
+        .args(&["qdisc", "replace", "dev", iface, "parent", &format!("1:{}", sub_handle).to_string(), "sfq",
+        "perturb", "30", "headdrop", "probability", "0.5", "redflowlimit", "20000", "ecn", "harddrop" ])
+        .status()
+        .await?;
+
+    if !add_status.success() {
+        slog::warn!(log, "qdisc replace with basic sfq failed");
+    }
+
+    Ok(())
+}
+
+async fn add_subscriber_dst_filter(iface: &str, sub: &SubscriberControlState, log: &slog::Logger) -> Result<(), EnforcementError> {
+    // TODO(matt9j) Only supports IPv4, should support v4 and v6!
+    slog::debug!(log, "About to add sub dst_filter"; "interface" => iface, "sub_handle" => &sub.qdisc_handle);
+
+    let add_status = tokio::process::Command::new("tc")
+        .args(&["filter", "replace", "dev", iface, "parent", "1:", "protocol", "ip", "prio", "1",
+        "u32", "match", "ip", "dst", &sub.ip.to_string(),
+         "flowid", &format!("1:{}", &sub.qdisc_handle).to_string()])
+        .status()
+        .await?;
+
+    if !add_status.success() {
+        slog::warn!(log, "add subscriber dst filter failed");
     }
 
     Ok(())
@@ -421,6 +513,12 @@ async fn query_reenabled_subscriber_bridge_state(
     Ok(rows)
 }
 
+#[derive(Debug)]
+struct SubscriberControlState {
+    qdisc_handle: String,
+    ip: ipnetwork::IpNetwork,
+}
+
 #[derive(Debug, Deserialize)]
 struct QDiscInfo {
     kind: String,
@@ -441,8 +539,8 @@ struct SubscriberRateLimitRow {
     subscriber_id: i32,
     ul_limit_policy: i32,
     dl_limit_policy: i32,
-    ul_limit_policy_parameters: String,
-    dl_limit_policy_parameters: String,
+    ul_limit_policy_parameters: serde_json::Value,
+    dl_limit_policy_parameters: serde_json::Value,
 }
 
 #[derive(Debug, Clone)]
@@ -460,7 +558,7 @@ struct SubscriberRateLimitInfo {
 
 fn create_policy_from_parameters(
     policy_id: i32,
-    _parameters: &String,
+    _parameters: &serde_json::Value,
 ) -> Result<RateLimitPolicy, EnforcementError> {
     match policy_id {
         1 => Ok(RateLimitPolicy::Unlimited),
