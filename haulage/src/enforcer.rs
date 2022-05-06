@@ -33,15 +33,25 @@ pub struct Iptables {
 impl Iptables {
     pub fn new(
         poll_period: std::time::Duration,
-        interface: &str,
+        subscriber_interface: &str,
+        upstream_interface: &Option<String>,
         db_pool: std::sync::Arc<sqlx::PgPool>,
         log: slog::Logger,
     ) -> Iptables {
         let (sender, receiver) = tokio::sync::mpsc::channel(64);
         let local_logger = log.clone();
-        let interface = interface.to_owned();
+        let subscriber_interface = subscriber_interface.to_owned();
+        let upstream_interface = upstream_interface.to_owned();
         let dispatch_handle = tokio::task::spawn(async move {
-            enforce_via_iptables(receiver, poll_period, &interface, db_pool, log).await;
+            enforce_via_iptables(
+                receiver,
+                poll_period,
+                subscriber_interface,
+                upstream_interface,
+                db_pool,
+                log,
+            )
+            .await;
         });
         Iptables {
             dispatch_handle: dispatch_handle,
@@ -85,7 +95,8 @@ struct PolicyUpdateMessage {
 async fn enforce_via_iptables(
     mut chan: tokio::sync::mpsc::Receiver<PolicyUpdateMessage>,
     period: std::time::Duration,
-    interface: &str,
+    subscriber_interface: String,
+    upstream_interface: Option<String>,
     db_pool: std::sync::Arc<sqlx::PgPool>,
     log: slog::Logger,
 ) -> () {
@@ -125,10 +136,10 @@ async fn enforce_via_iptables(
     }
 
     // Clear any existing queuing disciplines on startup.
-    clear_interface_limit(interface, &log).await.unwrap();
+    clear_interface_limit(&subscriber_interface, &log).await.unwrap();
 
     // Setup the root QFQ qdisc
-    setup_root_qdisc(interface, &log).await.unwrap();
+    setup_root_qdisc(&subscriber_interface, &log).await.unwrap();
 
     let current_db_state = query_all_subscriber_ratelimit_state(&db_pool, &log)
         .await
@@ -155,10 +166,10 @@ async fn enforce_via_iptables(
         };
 
         // Setup subscriber qfq class
-        setup_subscriber_class(interface, &sub_limit_state.qdisc_handle, &log)
+        setup_subscriber_class(&subscriber_interface, &sub_limit_state.qdisc_handle, &log)
             .await
             .unwrap();
-        add_subscriber_dst_filter(interface, &sub_limit_state, &log)
+        add_subscriber_dst_filter(&subscriber_interface, &sub_limit_state, &log)
             .await
             .unwrap();
 
@@ -173,14 +184,19 @@ async fn enforce_via_iptables(
 
         match sub.dl_policy {
             RateLimitPolicy::Unlimited => {
-                clear_user_limit(interface, &sub_limit_state.qdisc_handle, &log)
+                clear_user_limit(&subscriber_interface, &sub_limit_state.qdisc_handle, &log)
                     .await
                     .unwrap();
             }
             RateLimitPolicy::TokenBucket(params) => {
-                set_user_token_bucket(interface, &sub_limit_state.qdisc_handle, params, &log)
-                    .await
-                    .unwrap();
+                set_user_token_bucket(
+                    &subscriber_interface,
+                    &sub_limit_state.qdisc_handle,
+                    params,
+                    &log,
+                )
+                .await
+                .unwrap();
             }
         }
     }
