@@ -18,6 +18,8 @@ pub enum EnforcementError {
     RateLimitPolicyError(i32),
     #[error("Rate limit policy parameter error {0}")]
     RateLimitParameterError(String),
+    #[error("The tc queuing discipline management function returned an error")]
+    TcCommandError,
     #[error("Failed to parse json: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
 }
@@ -346,30 +348,32 @@ async fn clear_interface_limit(iface: &str, log: &slog::Logger) -> Result<(), En
         .await?;
 
     // Delete the options "key", which in debian Buster and earlier is not valid
-    // JSON for the tbf qdisc :(
+    // JSON!
+    // https://lkml.kernel.org/netdev/278df9b9-e2f6-fe8a-e7d6-432b29a39697@gmail.com/T/
     let current_iface_status = delete_malformed_options_element(
         std::str::from_utf8(&current_iface_status.stdout).unwrap(),
     );
     let current_iface_qdiscs: Vec<QDiscInfo> = serde_json::from_str(&current_iface_status)?;
-    if current_iface_qdiscs.len() > 1 {
-        slog::warn!(log, "Clearing non-trivial qdisc config");
-        for qdisc in current_iface_qdiscs {
-            if qdisc.root.unwrap_or(false) {
-                // Skip the root qdisc, which cannot be deleted.
-                continue;
-            }
-
-            slog::info!(log, "Clearing"; "kind" => qdisc.kind, "handle" => qdisc.handle);
-
-            let clear_status = tokio::process::Command::new("tc")
-                .args(&["qdisc", "del", "dev", iface, "parent root"])
-                .status()
-                .await?;
-
-            if !clear_status.success() {
-                slog::warn!(log, "qdisc clear failed");
-            }
+    if current_iface_qdiscs.len() == 1 {
+        if current_iface_qdiscs.first().unwrap().handle == "0:" {
+            slog::info!(log, "Only default qdisc present, nothing to clear"; "interface" => iface);
+            return Ok(());
         }
+    }
+
+    slog::warn!(log, "Clearing non-trivial qdisc config");
+
+    let clear_output = tokio::process::Command::new("tc")
+        .args(&["qdisc", "del", "dev", iface, "parent", "root"])
+        .output()
+        .await?;
+
+    if !clear_output.status.success() {
+        slog::error!(log, "Tc command to clear interface failed";
+            "stdout" => String::from_utf8(clear_output.stdout).unwrap_or("[Failed to parse output]".to_owned()),
+            "stderr" => String::from_utf8(clear_output.stderr).unwrap_or("[Failed to parse output]".to_owned())
+        );
+        return Err(EnforcementError::TcCommandError);
     }
 
     Ok(())
