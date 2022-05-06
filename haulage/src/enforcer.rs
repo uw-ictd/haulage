@@ -1,6 +1,6 @@
 use serde::Deserialize;
-use thiserror::Error;
 use std::collections::HashMap;
+use thiserror::Error;
 
 pub use i32 as UserId;
 
@@ -104,7 +104,13 @@ async fn enforce_via_iptables(
     for sub in current_db_state {
         let sub_handle = format!("{:x}", next_handle_id).to_string();
         next_handle_id += 1;
-        subscriber_limit_control_state.insert(sub.subscriber_id, SubscriberControlState { qdisc_handle: sub_handle, ip: sub.ip });
+        subscriber_limit_control_state.insert(
+            sub.subscriber_id,
+            SubscriberControlState {
+                qdisc_handle: sub_handle,
+                ip: sub.ip,
+            },
+        );
         if sub.bridged {
             delete_forwarding_reject_rule(&sub.ip.ip(), &log)
                 .await
@@ -133,31 +139,47 @@ async fn enforce_via_iptables(
             None => {
                 let sub_handle = format!("{:x}", next_handle_id).to_string();
                 next_handle_id += 1;
-                subscriber_limit_control_state.insert(sub.subscriber_id, SubscriberControlState { qdisc_handle: sub_handle, ip: sub.ip });
-                subscriber_limit_control_state.get(&sub.subscriber_id).expect("Unable to retrieve key just inserted")
+                subscriber_limit_control_state.insert(
+                    sub.subscriber_id,
+                    SubscriberControlState {
+                        qdisc_handle: sub_handle,
+                        ip: sub.ip,
+                    },
+                );
+                subscriber_limit_control_state
+                    .get(&sub.subscriber_id)
+                    .expect("Unable to retrieve key just inserted")
             }
         };
 
         // Setup subscriber qfq class
-        setup_subscriber_class(interface, &sub_limit_state.qdisc_handle, &log).await.unwrap();
-        add_subscriber_dst_filter(interface, &sub_limit_state, &log).await.unwrap();
+        setup_subscriber_class(interface, &sub_limit_state.qdisc_handle, &log)
+            .await
+            .unwrap();
+        add_subscriber_dst_filter(interface, &sub_limit_state, &log)
+            .await
+            .unwrap();
 
         match sub.ul_policy {
             RateLimitPolicy::Unlimited => {
                 // clear_user_limit(interface, &sub_limit_state.qdisc_handle, &log).await.unwrap();
-            },
+            }
             RateLimitPolicy::TokenBucket(_params) => {
                 //set_user_token_bucket(interface, &sub_limit_state.qdisc_handle, params, &log).await.unwrap();
-            },
+            }
         }
 
         match sub.dl_policy {
             RateLimitPolicy::Unlimited => {
-                clear_user_limit(interface, &sub_limit_state.qdisc_handle, &log).await.unwrap();
-            },
+                clear_user_limit(interface, &sub_limit_state.qdisc_handle, &log)
+                    .await
+                    .unwrap();
+            }
             RateLimitPolicy::TokenBucket(params) => {
-                set_user_token_bucket(interface, &sub_limit_state.qdisc_handle, params, &log).await.unwrap();
-            },
+                set_user_token_bucket(interface, &sub_limit_state.qdisc_handle, params, &log)
+                    .await
+                    .unwrap();
+            }
         }
     }
 
@@ -357,7 +379,9 @@ async fn setup_root_qdisc(iface: &str, log: &slog::Logger) -> Result<(), Enforce
     slog::debug!(log, "About to setup root qdisc"; "interface" => iface);
 
     let add_status = tokio::process::Command::new("tc")
-        .args(&["qdisc", "replace", "dev", iface, "parent", "root", "handle", "1:", "qfq" ])
+        .args(&[
+            "qdisc", "replace", "dev", iface, "parent", "root", "handle", "1:", "qfq",
+        ])
         .status()
         .await?;
 
@@ -368,12 +392,27 @@ async fn setup_root_qdisc(iface: &str, log: &slog::Logger) -> Result<(), Enforce
     Ok(())
 }
 
-async fn setup_subscriber_class(iface: &str, sub_handle_fragment: &str, log: &slog::Logger) -> Result<(), EnforcementError> {
+async fn setup_subscriber_class(
+    iface: &str,
+    sub_handle_fragment: &str,
+    log: &slog::Logger,
+) -> Result<(), EnforcementError> {
     slog::debug!(log, "About to add subscriber class to base qdisc"; "interface" => iface, "sub" => sub_handle_fragment);
 
     let add_status = tokio::process::Command::new("tc")
-        .args(&["class", "replace", "dev", iface, "parent", "1:", "classid", &format!("1:{}", sub_handle_fragment).to_string(),
-         "qfq", "weight", "10" ])
+        .args(&[
+            "class",
+            "replace",
+            "dev",
+            iface,
+            "parent",
+            "1:",
+            "classid",
+            &format!("1:{}", sub_handle_fragment).to_string(),
+            "qfq",
+            "weight",
+            "10",
+        ])
         .status()
         .await?;
 
@@ -384,12 +423,32 @@ async fn setup_subscriber_class(iface: &str, sub_handle_fragment: &str, log: &sl
     Ok(())
 }
 
-async fn clear_user_limit(iface: &str, sub_handle: &str, log: &slog::Logger) -> Result<(), EnforcementError> {
+async fn clear_user_limit(
+    iface: &str,
+    sub_handle: &str,
+    log: &slog::Logger,
+) -> Result<(), EnforcementError> {
     slog::debug!(log, "About to clear sub"; "interface" => iface, "sub_handle" => sub_handle);
 
     let add_status = tokio::process::Command::new("tc")
-        .args(&["qdisc", "replace", "dev", iface, "parent", &format!("1:{}", sub_handle).to_string(), "sfq",
-        "perturb", "30", "headdrop", "probability", "0.5", "redflowlimit", "20000", "ecn", "harddrop" ])
+        .args(&[
+            "qdisc",
+            "replace",
+            "dev",
+            iface,
+            "parent",
+            &format!("1:{}", sub_handle).to_string(),
+            "sfq",
+            "perturb",
+            "30",
+            "headdrop",
+            "probability",
+            "0.5",
+            "redflowlimit",
+            "20000",
+            "ecn",
+            "harddrop",
+        ])
         .status()
         .await?;
 
@@ -400,7 +459,12 @@ async fn clear_user_limit(iface: &str, sub_handle: &str, log: &slog::Logger) -> 
     Ok(())
 }
 
-async fn set_user_token_bucket(iface: &str, sub_handle: &str, params: TokenBucketParameters, log: &slog::Logger) -> Result<(), EnforcementError> {
+async fn set_user_token_bucket(
+    iface: &str,
+    sub_handle: &str,
+    params: TokenBucketParameters,
+    log: &slog::Logger,
+) -> Result<(), EnforcementError> {
     slog::debug!(log, "About to set token bucket for sub"; "interface" => iface, "sub_handle" => sub_handle);
     // For now set common-sense defaults within haulage. Derive the burst size
     // from the rate. Set a max latency of 20ms, although it should not matter
@@ -410,12 +474,23 @@ async fn set_user_token_bucket(iface: &str, sub_handle: &str, params: TokenBucke
     let burst_size_kbit = (std::cmp::max(16, ((params.rate_kibps as f64) / 50.0) as u32));
 
     let add_status = tokio::process::Command::new("tc")
-        .args(&["qdisc", "replace", "dev", iface, "parent", &format!("1:{}", sub_handle).to_string(),
-        "handle", &format!("2{}:", sub_handle).to_string(),
-        "tbf",
-        "rate", &format!("{}kbit", params.rate_kibps).to_string(),
-        "burst", &format!("{}kbit", burst_size_kbit).to_string(),
-        "latency", "20ms"])
+        .args(&[
+            "qdisc",
+            "replace",
+            "dev",
+            iface,
+            "parent",
+            &format!("1:{}", sub_handle).to_string(),
+            "handle",
+            &format!("2{}:", sub_handle).to_string(),
+            "tbf",
+            "rate",
+            &format!("{}kbit", params.rate_kibps).to_string(),
+            "burst",
+            &format!("{}kbit", burst_size_kbit).to_string(),
+            "latency",
+            "20ms",
+        ])
         .status()
         .await?;
 
@@ -424,8 +499,24 @@ async fn set_user_token_bucket(iface: &str, sub_handle: &str, params: TokenBucke
     }
 
     let add_status = tokio::process::Command::new("tc")
-        .args(&["qdisc", "replace", "dev", iface, "parent", &format!("2{}:", sub_handle).to_string(), "sfq",
-        "perturb", "30", "headdrop", "probability", "0.5", "redflowlimit", "20000", "ecn", "harddrop" ])
+        .args(&[
+            "qdisc",
+            "replace",
+            "dev",
+            iface,
+            "parent",
+            &format!("2{}:", sub_handle).to_string(),
+            "sfq",
+            "perturb",
+            "30",
+            "headdrop",
+            "probability",
+            "0.5",
+            "redflowlimit",
+            "20000",
+            "ecn",
+            "harddrop",
+        ])
         .status()
         .await?;
 
@@ -436,14 +527,34 @@ async fn set_user_token_bucket(iface: &str, sub_handle: &str, params: TokenBucke
     Ok(())
 }
 
-async fn add_subscriber_dst_filter(iface: &str, sub: &SubscriberControlState, log: &slog::Logger) -> Result<(), EnforcementError> {
+async fn add_subscriber_dst_filter(
+    iface: &str,
+    sub: &SubscriberControlState,
+    log: &slog::Logger,
+) -> Result<(), EnforcementError> {
     // TODO(matt9j) Only supports IPv4, should support v4 and v6!
     slog::debug!(log, "About to add sub dst_filter"; "interface" => iface, "sub_handle" => &sub.qdisc_handle);
 
     let add_status = tokio::process::Command::new("tc")
-        .args(&["filter", "replace", "dev", iface, "parent", "1:", "protocol", "ip", "prio", "1",
-        "u32", "match", "ip", "dst", &sub.ip.to_string(),
-         "flowid", &format!("1:{}", &sub.qdisc_handle).to_string()])
+        .args(&[
+            "filter",
+            "replace",
+            "dev",
+            iface,
+            "parent",
+            "1:",
+            "protocol",
+            "ip",
+            "prio",
+            "1",
+            "u32",
+            "match",
+            "ip",
+            "dst",
+            &sub.ip.to_string(),
+            "flowid",
+            &format!("1:{}", &sub.qdisc_handle).to_string(),
+        ])
         .status()
         .await?;
 
@@ -616,10 +727,12 @@ fn create_policy_from_parameters(
         1 => Ok(RateLimitPolicy::Unlimited),
         2 => {
             let parsed_parameters = TokenBucketParameters {
-                rate_kibps: parameters.rate_kibps.ok_or(EnforcementError::RateLimitParameterError("Missing rate_kibps".to_owned()))?,
+                rate_kibps: parameters.rate_kibps.ok_or(
+                    EnforcementError::RateLimitParameterError("Missing rate_kibps".to_owned()),
+                )?,
             };
             Ok(RateLimitPolicy::TokenBucket(parsed_parameters))
-        },
+        }
         _ => Err(EnforcementError::RateLimitPolicyError(policy_id)),
     }
 }
