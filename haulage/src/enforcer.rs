@@ -104,7 +104,7 @@ async fn enforce_via_iptables(
         .expect("Unable to get initial desired iptables state!");
 
     for sub in current_db_state {
-        let sub_handle = format!("{:x}", next_handle_id).to_string();
+        let sub_handle = format!("{:x}", next_handle_id);
         next_handle_id += 1;
         subscriber_limit_control_state.insert(
             sub.subscriber_id,
@@ -139,7 +139,7 @@ async fn enforce_via_iptables(
         let sub_limit_state = match sub_limit_state {
             Some(state) => state,
             None => {
-                let sub_handle = format!("{:x}", next_handle_id).to_string();
+                let sub_handle = format!("{:x}", next_handle_id);
                 next_handle_id += 1;
                 subscriber_limit_control_state.insert(
                     sub.subscriber_id,
@@ -412,7 +412,7 @@ async fn setup_subscriber_class(
             "parent",
             "1:",
             "classid",
-            &format!("1:{}", sub_handle_fragment).to_string(),
+            &format!("1:{}", sub_handle_fragment).as_str(),
             "qfq",
             "weight",
             "10",
@@ -441,7 +441,7 @@ async fn clear_user_limit(
             "dev",
             iface,
             "parent",
-            &format!("1:{}", sub_handle).to_string(),
+            &format!("1:{}", sub_handle).as_str(),
             "sfq",
             "perturb",
             "30",
@@ -484,14 +484,14 @@ async fn set_user_token_bucket(
             "dev",
             iface,
             "parent",
-            &format!("1:{}", sub_handle).to_string(),
+            &format!("1:{}", sub_handle).as_str(),
             "handle",
-            &format!("2{}:", sub_handle).to_string(),
+            &format!("2{}:", sub_handle).as_str(),
             "tbf",
             "rate",
-            &format!("{}kbit", params.rate_kibps).to_string(),
+            &format!("{}kbit", params.rate_kibps).as_str(),
             "burst",
-            &format!("{}kbit", burst_size_kbit).to_string(),
+            &format!("{}kbit", burst_size_kbit).as_str(),
             "latency",
             "20ms",
         ])
@@ -509,7 +509,7 @@ async fn set_user_token_bucket(
             "dev",
             iface,
             "parent",
-            &format!("2{}:", sub_handle).to_string(),
+            &format!("2{}:", sub_handle).as_str(),
             "sfq",
             "perturb",
             "30",
@@ -557,7 +557,7 @@ async fn add_subscriber_dst_filter(
             "dst",
             &sub.ip.to_string(),
             "flowid",
-            &format!("1:{}", &sub.qdisc_handle).to_string(),
+            &format!("1:{}", &sub.qdisc_handle).as_str(),
         ])
         .status()
         .await?;
