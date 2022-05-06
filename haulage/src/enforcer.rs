@@ -16,6 +16,8 @@ pub enum EnforcementError {
     CommunicationError,
     #[error("Unknown Rate Limit policy id {0}")]
     RateLimitPolicyError(i32),
+    #[error("Rate limit policy parameter error {0}")]
+    RateLimitParameterError(String),
     #[error("Failed to parse json: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
 }
@@ -143,13 +145,19 @@ async fn enforce_via_iptables(
         match sub.ul_policy {
             RateLimitPolicy::Unlimited => {
                 // clear_user_limit(interface, &sub_limit_state.qdisc_handle, &log).await.unwrap();
-            }
+            },
+            RateLimitPolicy::TokenBucket(_params) => {
+                //set_user_token_bucket(interface, &sub_limit_state.qdisc_handle, params, &log).await.unwrap();
+            },
         }
 
         match sub.dl_policy {
             RateLimitPolicy::Unlimited => {
                 clear_user_limit(interface, &sub_limit_state.qdisc_handle, &log).await.unwrap();
-            }
+            },
+            RateLimitPolicy::TokenBucket(params) => {
+                set_user_token_bucket(interface, &sub_limit_state.qdisc_handle, params, &log).await.unwrap();
+            },
         }
     }
 
@@ -227,9 +235,6 @@ async fn set_local_only_policy(
     let bridge_state = update_bridged(&db_pool, target, false, log).await?;
     set_forwarding_reject_rule(&bridge_state.ip.ip(), log).await
 }
-
-// TODO(matt9j) Add handlers for adding a user to ratelimiting, and removing a
-// user from rate-limiting in the overall filter tree.
 
 async fn delete_forwarding_reject_rule(
     ip: &std::net::IpAddr,
@@ -395,6 +400,42 @@ async fn clear_user_limit(iface: &str, sub_handle: &str, log: &slog::Logger) -> 
     Ok(())
 }
 
+async fn set_user_token_bucket(iface: &str, sub_handle: &str, params: TokenBucketParameters, log: &slog::Logger) -> Result<(), EnforcementError> {
+    slog::debug!(log, "About to set token bucket for sub"; "interface" => iface, "sub_handle" => sub_handle);
+    // For now set common-sense defaults within haulage. Derive the burst size
+    // from the rate. Set a max latency of 20ms, although it should not matter
+    // since we are overriding the internal TBF queue with SFQ. Set the max
+    // burst to 20ms worth of data, or at least 2kB
+
+    let burst_size_kbit = (std::cmp::max(16, ((params.rate_kibps as f64) / 50.0) as u32));
+
+    let add_status = tokio::process::Command::new("tc")
+        .args(&["qdisc", "replace", "dev", iface, "parent", &format!("1:{}", sub_handle).to_string(),
+        "handle", &format!("2{}:", sub_handle).to_string(),
+        "tbf",
+        "rate", &format!("{}kbit", params.rate_kibps).to_string(),
+        "burst", &format!("{}kbit", burst_size_kbit).to_string(),
+        "latency", "20ms"])
+        .status()
+        .await?;
+
+    if !add_status.success() {
+        slog::warn!(log, "qdisc replace with first level tbf failed");
+    }
+
+    let add_status = tokio::process::Command::new("tc")
+        .args(&["qdisc", "replace", "dev", iface, "parent", &format!("2{}:", sub_handle).to_string(), "sfq",
+        "perturb", "30", "headdrop", "probability", "0.5", "redflowlimit", "20000", "ecn", "harddrop" ])
+        .status()
+        .await?;
+
+    if !add_status.success() {
+        slog::warn!(log, "qdisc add second level sfq failed");
+    }
+
+    Ok(())
+}
+
 async fn add_subscriber_dst_filter(iface: &str, sub: &SubscriberControlState, log: &slog::Logger) -> Result<(), EnforcementError> {
     // TODO(matt9j) Only supports IPv4, should support v4 and v6!
     slog::debug!(log, "About to add sub dst_filter"; "interface" => iface, "sub_handle" => &sub.qdisc_handle);
@@ -533,19 +574,30 @@ struct SubscriberBridgeInfo {
     bridged: bool,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct LimitPolicyParameters {
+    rate_kibps: Option<u32>,
+}
+
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct SubscriberRateLimitRow {
     ip: ipnetwork::IpNetwork,
     subscriber_id: i32,
     ul_limit_policy: i32,
     dl_limit_policy: i32,
-    ul_limit_policy_parameters: serde_json::Value,
-    dl_limit_policy_parameters: serde_json::Value,
+    ul_limit_policy_parameters: sqlx::types::Json<LimitPolicyParameters>,
+    dl_limit_policy_parameters: sqlx::types::Json<LimitPolicyParameters>,
+}
+
+#[derive(Debug, Clone)]
+struct TokenBucketParameters {
+    rate_kibps: u32,
 }
 
 #[derive(Debug, Clone)]
 enum RateLimitPolicy {
-    Unlimited = 1,
+    Unlimited,
+    TokenBucket(TokenBucketParameters),
 }
 
 #[derive(Debug, Clone)]
@@ -558,10 +610,16 @@ struct SubscriberRateLimitInfo {
 
 fn create_policy_from_parameters(
     policy_id: i32,
-    _parameters: &serde_json::Value,
+    parameters: &LimitPolicyParameters,
 ) -> Result<RateLimitPolicy, EnforcementError> {
     match policy_id {
         1 => Ok(RateLimitPolicy::Unlimited),
+        2 => {
+            let parsed_parameters = TokenBucketParameters {
+                rate_kibps: parameters.rate_kibps.ok_or(EnforcementError::RateLimitParameterError("Missing rate_kibps".to_owned()))?,
+            };
+            Ok(RateLimitPolicy::TokenBucket(parsed_parameters))
+        },
         _ => Err(EnforcementError::RateLimitPolicyError(policy_id)),
     }
 }
