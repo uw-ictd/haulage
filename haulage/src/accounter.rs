@@ -4,7 +4,6 @@ pub use i32 as UserId;
 
 #[derive(Debug)]
 pub struct UserAccounter {
-    dispatch_handle: tokio::task::JoinHandle<()>,
     dispatch_channel: tokio::sync::mpsc::Sender<Message>,
 }
 impl UserAccounter {
@@ -15,11 +14,10 @@ impl UserAccounter {
         log: slog::Logger,
     ) -> UserAccounter {
         let (sender, receiver) = tokio::sync::mpsc::channel(64);
-        let dispatch_handle = tokio::task::spawn(async move {
+        tokio::task::spawn(async move {
             accounting_task_dispatcher(receiver, period, db_pool, enforcer, log).await;
         });
         UserAccounter {
-            dispatch_handle: dispatch_handle,
             dispatch_channel: sender,
         }
     }

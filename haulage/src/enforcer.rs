@@ -26,7 +26,6 @@ pub enum EnforcementError {
 
 #[derive(Debug)]
 pub struct Iptables {
-    dispatch_handle: tokio::task::JoinHandle<()>,
     dispatch_channel: tokio::sync::mpsc::Sender<PolicyUpdateMessage>,
     log: slog::Logger,
 }
@@ -42,7 +41,7 @@ impl Iptables {
         let local_logger = log.clone();
         let subscriber_interface = subscriber_interface.to_owned();
         let upstream_interface = upstream_interface.to_owned();
-        let dispatch_handle = tokio::task::spawn(async move {
+        tokio::task::spawn(async move {
             enforce_via_iptables(
                 receiver,
                 poll_period,
@@ -54,7 +53,6 @@ impl Iptables {
             .await;
         });
         Iptables {
-            dispatch_handle: dispatch_handle,
             dispatch_channel: sender,
             log: local_logger,
         }
@@ -643,7 +641,7 @@ async fn set_user_token_bucket(
     // since we are overriding the internal TBF queue with SFQ. Set the max
     // burst to 20ms worth of data, or at least 2kB
 
-    let burst_size_kbit = (std::cmp::max(16, ((params.rate_kibps as f64) / 50.0) as u32));
+    let burst_size_kbit = std::cmp::max(16, ((params.rate_kibps as f64) / 50.0) as u32);
 
     let add_status = tokio::process::Command::new("tc")
         .args(&[
@@ -886,9 +884,7 @@ struct SubscriberControlState {
 
 #[derive(Debug, Deserialize)]
 struct QDiscInfo {
-    kind: String,
     handle: String,
-    root: Option<bool>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
