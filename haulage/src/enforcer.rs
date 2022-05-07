@@ -136,7 +136,9 @@ async fn enforce_via_iptables(
     }
 
     // Clear any existing queuing disciplines on startup.
-    clear_interface_limit(&subscriber_interface, &log).await.unwrap();
+    clear_interface_limit(&subscriber_interface, &log)
+        .await
+        .unwrap();
 
     // Setup the root QFQ qdisc
     setup_root_qdisc(&subscriber_interface, &log).await.unwrap();
@@ -411,7 +413,7 @@ fn delete_malformed_options_element(input: &str) -> String {
 }
 
 async fn clear_interface_limit(iface: &str, log: &slog::Logger) -> Result<(), EnforcementError> {
-    slog::debug!(log, "About to clear interface config"; "interface" => iface);
+    slog::debug!(log, "clearing interface config"; "interface" => iface);
     let current_iface_status = tokio::process::Command::new("tc")
         .args(&["-j", "qdisc", "show", "dev", iface])
         .output()
@@ -426,12 +428,12 @@ async fn clear_interface_limit(iface: &str, log: &slog::Logger) -> Result<(), En
     let current_iface_qdiscs: Vec<QDiscInfo> = serde_json::from_str(&current_iface_status)?;
     if current_iface_qdiscs.len() == 1 {
         if current_iface_qdiscs.first().unwrap().handle == "0:" {
-            slog::info!(log, "Only default qdisc present, nothing to clear"; "interface" => iface);
+            slog::info!(log, "only default qdisc present, nothing to clear"; "interface" => iface);
             return Ok(());
         }
     }
 
-    slog::warn!(log, "Clearing non-trivial qdisc config");
+    slog::warn!(log, "clearing non-trivial qdisc config");
 
     let clear_output = tokio::process::Command::new("tc")
         .args(&["qdisc", "del", "dev", iface, "parent", "root"])
@@ -439,7 +441,7 @@ async fn clear_interface_limit(iface: &str, log: &slog::Logger) -> Result<(), En
         .await?;
 
     if !clear_output.status.success() {
-        slog::error!(log, "Tc command to clear interface failed";
+        slog::error!(log, "tc command to clear interface failed";
             "stdout" => String::from_utf8(clear_output.stdout).unwrap_or("[Failed to parse output]".to_owned()),
             "stderr" => String::from_utf8(clear_output.stderr).unwrap_or("[Failed to parse output]".to_owned())
         );
@@ -450,7 +452,7 @@ async fn clear_interface_limit(iface: &str, log: &slog::Logger) -> Result<(), En
 }
 
 async fn setup_root_qdisc(iface: &str, log: &slog::Logger) -> Result<(), EnforcementError> {
-    slog::debug!(log, "About to setup root qdisc"; "interface" => iface);
+    slog::debug!(log, "Setting up root qdisc"; "interface" => iface);
 
     let add_status = tokio::process::Command::new("tc")
         .args(&[
@@ -471,7 +473,7 @@ async fn setup_subscriber_class(
     sub_handle_fragment: &str,
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
-    slog::debug!(log, "About to add subscriber class to base qdisc"; "interface" => iface, "sub" => sub_handle_fragment);
+    slog::debug!(log, "adding subscriber class to base qdisc"; "interface" => iface, "sub" => sub_handle_fragment);
 
     let add_status = tokio::process::Command::new("tc")
         .args(&[
@@ -495,29 +497,29 @@ async fn setup_subscriber_class(
     }
 
     let add_status = tokio::process::Command::new("tc")
-    .args(&[
-        "qdisc",
-        "replace",
-        "dev",
-        iface,
-        "parent",
-        &format!("1:{}", sub_handle_fragment).as_str(),
-        "handle",
-        &format!("A{}:", sub_handle_fragment).as_str(),
-        "pfifo"
-    ])
-    .status()
-    .await?;
+        .args(&[
+            "qdisc",
+            "replace",
+            "dev",
+            iface,
+            "parent",
+            &format!("1:{}", sub_handle_fragment).as_str(),
+            "handle",
+            &format!("A{}:", sub_handle_fragment).as_str(),
+            "pfifo",
+        ])
+        .status()
+        .await?;
 
-if !add_status.success() {
-    slog::warn!(log, "qdisc add second level sfq failed");
-}
+    if !add_status.success() {
+        slog::warn!(log, "qdisc add temporary user qdisc failed");
+    }
 
     Ok(())
 }
 
 async fn setup_fallback_class(iface: &str, log: &slog::Logger) -> Result<(), EnforcementError> {
-    slog::debug!(log, "About to add fallback class to base qdisc"; "interface" => iface);
+    slog::debug!(log, "adding fallback class to base qdisc"; "interface" => iface);
 
     let add_status = tokio::process::Command::new("tc")
         .args(&[
@@ -531,7 +533,7 @@ async fn setup_fallback_class(iface: &str, log: &slog::Logger) -> Result<(), Enf
         slog::warn!(log, "qfq add default class failed");
     }
 
-    slog::debug!(log, "About to add catchall_filter"; "interface" => iface);
+    slog::debug!(log, "adding catchall_filter"; "interface" => iface);
 
     let add_status = tokio::process::Command::new("tc")
         .args(&[
@@ -545,7 +547,7 @@ async fn setup_fallback_class(iface: &str, log: &slog::Logger) -> Result<(), Enf
         slog::warn!(log, "add catchall filter failed");
     }
 
-    slog::debug!(log, "About to add catchall_qdisc"; "interface" => iface);
+    slog::debug!(log, "adding catchall_qdisc"; "interface" => iface);
     let add_status = tokio::process::Command::new("tc")
         .args(&[
             "qdisc", "replace", "dev", iface, "parent", "1:0xFFFF", "handle", "0x1FFF", "fq_codel",
@@ -565,7 +567,7 @@ async fn clear_user_limit(
     sub_handle: &str,
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
-    slog::debug!(log, "About to clear sub"; "interface" => iface, "sub_handle" => sub_handle);
+    slog::debug!(log, "clearing limit"; "interface" => iface, "sub_handle" => sub_handle);
 
     let del_status = tokio::process::Command::new("tc")
         .args(&[
@@ -619,7 +621,7 @@ async fn set_user_token_bucket(
     params: TokenBucketParameters,
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
-    slog::debug!(log, "About to set token bucket for sub"; "interface" => iface, "sub_handle" => sub_handle);
+    slog::debug!(log, "setting token bucket limit"; "interface" => iface, "sub_handle" => sub_handle);
 
     let del_status = tokio::process::Command::new("tc")
         .args(&[
@@ -705,7 +707,7 @@ async fn add_subscriber_dst_filter(
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
     // TODO(matt9j) Only supports IPv4, should support v4 and v6!
-    slog::debug!(log, "About to add sub dst_filter"; "interface" => iface, "sub_handle" => &sub.qdisc_handle);
+    slog::debug!(log, "adding sub dst_filter"; "interface" => iface, "sub_handle" => &sub.qdisc_handle);
 
     let add_status = tokio::process::Command::new("tc")
         .args(&[
@@ -744,7 +746,7 @@ async fn add_subscriber_src_filter(
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
     // TODO(matt9j) Only supports IPv4, should support v4 and v6!
-    slog::debug!(log, "About to add sub src filter"; "interface" => iface, "sub_handle" => &sub.qdisc_handle);
+    slog::debug!(log, "adding sub src filter"; "interface" => iface, "sub_handle" => &sub.qdisc_handle);
 
     let add_status = tokio::process::Command::new("tc")
         .args(&[
@@ -783,7 +785,7 @@ async fn update_bridged(
     log: &slog::Logger,
 ) -> Result<SubscriberBridgeInfo, EnforcementError> {
     let mut transaction = db_pool.begin().await?;
-    slog::debug!(log, "Updating bridge state in DB"; "id" => id);
+    slog::debug!(log, "updating bridge state in DB"; "id" => id);
 
     let subscriber_update_query = r#"
         UPDATE subscribers
@@ -814,7 +816,7 @@ async fn query_all_subscriber_ratelimit_state(
     log: &slog::Logger,
 ) -> Result<Vec<SubscriberRateLimitInfo>, EnforcementError> {
     let mut transaction = db_pool.begin().await?;
-    slog::debug!(log, "Querying global ratelimit db state");
+    slog::debug!(log, "querying global ratelimit db state");
 
     let ratelimit_state_query = r#"
         SELECT "internal_uid" AS "subscriber_id", "ip", "ul_limit_policy", "dl_limit_policy", "ul_limit_policy_parameters", "dl_limit_policy_parameters"
@@ -840,7 +842,7 @@ async fn query_all_subscriber_bridge_state(
     log: &slog::Logger,
 ) -> Result<Vec<SubscriberBridgeInfo>, EnforcementError> {
     let mut transaction = db_pool.begin().await?;
-    slog::debug!(log, "Querying global bridged db state");
+    slog::debug!(log, "querying global bridged db state");
 
     let bridge_state_query = r#"
         SELECT "ip", "internal_uid" AS "subscriber_id", "bridged"
@@ -860,7 +862,7 @@ async fn query_reenabled_subscriber_bridge_state(
     log: &slog::Logger,
 ) -> Result<Vec<SubscriberBridgeInfo>, EnforcementError> {
     let mut transaction = db_pool.begin().await?;
-    slog::debug!(log, "Querying reenabled subscribers");
+    slog::debug!(log, "querying reenabled subscribers");
 
     let bridge_state_query = r#"
         SELECT "ip", "internal_uid" AS "subscriber_id", "bridged"
