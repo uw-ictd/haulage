@@ -115,7 +115,7 @@ async fn enforce_via_iptables(
         .expect("Unable to get initial desired iptables state!");
 
     for sub in current_db_state {
-        let sub_handle = format!("{:x}", next_handle_id);
+        let sub_handle = format!("{:03X}", next_handle_id);
         next_handle_id += 1;
         subscriber_limit_control_state.insert(
             sub.subscriber_id,
@@ -141,6 +141,12 @@ async fn enforce_via_iptables(
     // Setup the root QFQ qdisc
     setup_root_qdisc(&subscriber_interface, &log).await.unwrap();
 
+    if upstream_interface.is_some() {
+        setup_root_qdisc(upstream_interface.as_ref().unwrap(), &log)
+            .await
+            .unwrap();
+    }
+
     let current_db_state = query_all_subscriber_ratelimit_state(&db_pool, &log)
         .await
         .expect("Unable to get initial ratelimit state");
@@ -150,7 +156,7 @@ async fn enforce_via_iptables(
         let sub_limit_state = match sub_limit_state {
             Some(state) => state,
             None => {
-                let sub_handle = format!("{:x}", next_handle_id);
+                let sub_handle = format!("{:03X}", next_handle_id);
                 next_handle_id += 1;
                 subscriber_limit_control_state.insert(
                     sub.subscriber_id,
@@ -169,16 +175,61 @@ async fn enforce_via_iptables(
         setup_subscriber_class(&subscriber_interface, &sub_limit_state.qdisc_handle, &log)
             .await
             .unwrap();
+
         add_subscriber_dst_filter(&subscriber_interface, &sub_limit_state, &log)
             .await
             .unwrap();
 
+        if upstream_interface.is_some() {
+            // Setup subscriber qfq class
+            setup_subscriber_class(
+                upstream_interface.as_ref().unwrap(),
+                &sub_limit_state.qdisc_handle,
+                &log,
+            )
+            .await
+            .unwrap();
+
+            add_subscriber_src_filter(upstream_interface.as_ref().unwrap(), &sub_limit_state, &log)
+                .await
+                .unwrap();
+        }
+
         match sub.ul_policy {
             RateLimitPolicy::Unlimited => {
-                // clear_user_limit(interface, &sub_limit_state.qdisc_handle, &log).await.unwrap();
+                match &upstream_interface {
+                    None => {
+                        slog::warn!(
+                            log,
+                            "No 'upstreamInterface' configured, not modifying queues for unlimited rate limit policy!"
+                        );
+                    }
+                    Some(upstream_if) => {
+                        clear_user_limit(upstream_if, &sub_limit_state.qdisc_handle, &log)
+                            .await
+                            .unwrap();
+                    }
+                };
             }
-            RateLimitPolicy::TokenBucket(_params) => {
-                //set_user_token_bucket(interface, &sub_limit_state.qdisc_handle, params, &log).await.unwrap();
+            RateLimitPolicy::TokenBucket(params) => {
+                match &upstream_interface {
+                    None => {
+                        slog::error!(
+                            log,
+                            "Cannot set uplink TokenBucket rate limit policy without 'upstreamInterface' config!"
+                        );
+                    }
+                    Some(upstream_if) => {
+                        set_user_token_bucket(
+                            upstream_if,
+                            &sub_limit_state.qdisc_handle,
+                            params,
+                            &log,
+                        )
+                        .await
+                        .unwrap();
+                    }
+                };
             }
         }
 
@@ -458,6 +509,8 @@ async fn clear_user_limit(
             iface,
             "parent",
             &format!("1:{}", sub_handle).as_str(),
+            "handle",
+            &format!("3{}:", sub_handle).as_str(),
             "sfq",
             "perturb",
             "30",
@@ -526,6 +579,8 @@ async fn set_user_token_bucket(
             iface,
             "parent",
             &format!("2{}:", sub_handle).as_str(),
+            "handle",
+            &format!("3{}:", sub_handle).as_str(),
             "sfq",
             "perturb",
             "30",
@@ -580,6 +635,45 @@ async fn add_subscriber_dst_filter(
 
     if !add_status.success() {
         slog::warn!(log, "add subscriber dst filter failed");
+    }
+
+    Ok(())
+}
+
+// TODO(matt9j) heavily duplicated with add_subscriber_dst_filter
+async fn add_subscriber_src_filter(
+    iface: &str,
+    sub: &SubscriberControlState,
+    log: &slog::Logger,
+) -> Result<(), EnforcementError> {
+    // TODO(matt9j) Only supports IPv4, should support v4 and v6!
+    slog::debug!(log, "About to add sub src filter"; "interface" => iface, "sub_handle" => &sub.qdisc_handle);
+
+    let add_status = tokio::process::Command::new("tc")
+        .args(&[
+            "filter",
+            "replace",
+            "dev",
+            iface,
+            "parent",
+            "1:",
+            "protocol",
+            "ip",
+            "prio",
+            "1",
+            "u32",
+            "match",
+            "ip",
+            "src",
+            &sub.ip.to_string(),
+            "flowid",
+            &format!("1:{}", &sub.qdisc_handle).as_str(),
+        ])
+        .status()
+        .await?;
+
+    if !add_status.success() {
+        slog::warn!(log, "add subscriber src filter failed");
     }
 
     Ok(())
