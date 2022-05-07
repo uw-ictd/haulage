@@ -494,6 +494,25 @@ async fn setup_subscriber_class(
         slog::warn!(log, "qfq add subscriber class failed");
     }
 
+    let add_status = tokio::process::Command::new("tc")
+    .args(&[
+        "qdisc",
+        "replace",
+        "dev",
+        iface,
+        "parent",
+        &format!("1:{}", sub_handle_fragment).as_str(),
+        "handle",
+        &format!("A{}:", sub_handle_fragment).as_str(),
+        "pfifo"
+    ])
+    .status()
+    .await?;
+
+if !add_status.success() {
+    slog::warn!(log, "qdisc add second level sfq failed");
+}
+
     Ok(())
 }
 
@@ -548,16 +567,31 @@ async fn clear_user_limit(
 ) -> Result<(), EnforcementError> {
     slog::debug!(log, "About to clear sub"; "interface" => iface, "sub_handle" => sub_handle);
 
+    let del_status = tokio::process::Command::new("tc")
+        .args(&[
+            "qdisc",
+            "del",
+            "dev",
+            iface,
+            "parent",
+            &format!("1:{}", sub_handle).as_str(),
+        ])
+        .status()
+        .await?;
+    if !del_status.success() {
+        slog::warn!(log, "qdisc delete existing user qdisc failed");
+    }
+
     let add_status = tokio::process::Command::new("tc")
         .args(&[
             "qdisc",
-            "replace",
+            "add",
             "dev",
             iface,
             "parent",
             &format!("1:{}", sub_handle).as_str(),
             "handle",
-            &format!("3{}:", sub_handle).as_str(),
+            &format!("A{}:", sub_handle).as_str(),
             "sfq",
             "perturb",
             "30",
@@ -573,7 +607,7 @@ async fn clear_user_limit(
         .await?;
 
     if !add_status.success() {
-        slog::warn!(log, "qdisc replace with basic sfq failed");
+        slog::warn!(log, "qdisc add basic sfq failed");
     }
 
     Ok(())
@@ -586,6 +620,22 @@ async fn set_user_token_bucket(
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
     slog::debug!(log, "About to set token bucket for sub"; "interface" => iface, "sub_handle" => sub_handle);
+
+    let del_status = tokio::process::Command::new("tc")
+        .args(&[
+            "qdisc",
+            "del",
+            "dev",
+            iface,
+            "parent",
+            &format!("1:{}", sub_handle).as_str(),
+        ])
+        .status()
+        .await?;
+    if !del_status.success() {
+        slog::warn!(log, "qdisc delete existing user qdisc failed");
+    }
+
     // For now set common-sense defaults within haulage. Derive the burst size
     // from the rate. Set a max latency of 20ms, although it should not matter
     // since we are overriding the internal TBF queue with SFQ. Set the max
@@ -596,7 +646,7 @@ async fn set_user_token_bucket(
     let add_status = tokio::process::Command::new("tc")
         .args(&[
             "qdisc",
-            "replace",
+            "add",
             "dev",
             iface,
             "parent",
@@ -615,19 +665,19 @@ async fn set_user_token_bucket(
         .await?;
 
     if !add_status.success() {
-        slog::warn!(log, "qdisc replace with first level tbf failed");
+        slog::warn!(log, "qdisc add with first level tbf failed");
     }
 
     let add_status = tokio::process::Command::new("tc")
         .args(&[
             "qdisc",
-            "replace",
+            "add",
             "dev",
             iface,
             "parent",
             &format!("2{}:", sub_handle).as_str(),
             "handle",
-            &format!("3{}:", sub_handle).as_str(),
+            &format!("A{}:", sub_handle).as_str(),
             "sfq",
             "perturb",
             "30",
