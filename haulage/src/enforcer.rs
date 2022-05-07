@@ -145,6 +145,9 @@ async fn enforce_via_iptables(
         setup_root_qdisc(upstream_interface.as_ref().unwrap(), &log)
             .await
             .unwrap();
+        setup_fallback_class(upstream_interface.as_ref().unwrap(), &log)
+            .await
+            .unwrap();
     }
 
     let current_db_state = query_all_subscriber_ratelimit_state(&db_pool, &log)
@@ -489,6 +492,50 @@ async fn setup_subscriber_class(
 
     if !add_status.success() {
         slog::warn!(log, "qfq add subscriber class failed");
+    }
+
+    Ok(())
+}
+
+async fn setup_fallback_class(iface: &str, log: &slog::Logger) -> Result<(), EnforcementError> {
+    slog::debug!(log, "About to add fallback class to base qdisc"; "interface" => iface);
+
+    let add_status = tokio::process::Command::new("tc")
+        .args(&[
+            "class", "replace", "dev", iface, "parent", "1:", "classid", "1:0xFFFF", "qfq",
+            "weight", "10",
+        ])
+        .status()
+        .await?;
+
+    if !add_status.success() {
+        slog::warn!(log, "qfq add default class failed");
+    }
+
+    slog::debug!(log, "About to add catchall_filter"; "interface" => iface);
+
+    let add_status = tokio::process::Command::new("tc")
+        .args(&[
+            "filter", "replace", "dev", iface, "parent", "1:", "protocol", "ip", "prio", "2",
+            "u32", "match", "u32", "0", "0", "flowid", "1:0xFFFF",
+        ])
+        .status()
+        .await?;
+
+    if !add_status.success() {
+        slog::warn!(log, "add catchall filter failed");
+    }
+
+    slog::debug!(log, "About to add catchall_qdisc"; "interface" => iface);
+    let add_status = tokio::process::Command::new("tc")
+        .args(&[
+            "qdisc", "replace", "dev", iface, "parent", "1:0xFFFF", "handle", "0x1FFF", "fq_codel",
+        ])
+        .status()
+        .await?;
+
+    if !add_status.success() {
+        slog::warn!(log, "add catchall qdisc failed");
     }
 
     Ok(())
