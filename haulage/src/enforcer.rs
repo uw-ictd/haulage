@@ -11,7 +11,9 @@ pub enum EnforcementError {
     #[error("User ID is not uniquely present")]
     UserIdError,
     #[error("Failed to update iptables: {0}")]
-    IptablesError(#[from] std::io::Error),
+    IptablesExecutionError(#[from] std::io::Error),
+    #[error("Failed to update iptables: {0}")]
+    IptablesLogicError(String),
     #[error("Lost communication with policy enforcer")]
     CommunicationError,
     #[error("Unknown Rate Limit policy id {0}")]
@@ -336,13 +338,19 @@ async fn delete_forwarding_reject_rule(
     ip: &std::net::IpAddr,
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
-    let command_status = tokio::process::Command::new("iptables")
+    if !forwarding_reject_rule_present(ip).await? {
+        slog::debug!(log, "Forwarding filter delete requested but filter not present"; "ip" => ip.to_string());
+        return Ok(());
+    }
+
+    let command_output = tokio::process::Command::new("iptables")
         .args(&["-D", "FORWARD", "-s", &ip.to_string(), "-j", "REJECT"])
-        .status()
+        .output()
         .await?;
 
-    if !command_status.success() {
-        slog::warn!(log, "iptables delete forward reject rule failed"; "ip" => ip.to_string());
+    if !command_output.status.success() {
+        slog::error!(log, "iptables delete forward reject rule failed"; "ip" => ip.to_string());
+        return Err(EnforcementError::IptablesLogicError(String::from_utf8(command_output.stderr).unwrap()));
     }
 
     Ok(())
