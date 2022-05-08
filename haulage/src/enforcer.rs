@@ -60,13 +60,13 @@ impl Iptables {
     pub async fn update_policy(
         &self,
         target: UserId,
-        new_policy: Policy,
+        new_policy: SubscriberCondition,
     ) -> Result<(), EnforcementError> {
         let (result_channel_tx, result_channel_rx) =
             tokio::sync::oneshot::channel::<Result<(), EnforcementError>>();
         self.dispatch_channel
             .send(PolicyUpdateMessage {
-                new_policy: new_policy,
+                new_state: new_policy,
                 target: target,
                 out_channel: result_channel_tx,
             })
@@ -79,13 +79,13 @@ impl Iptables {
     }
 }
 
-pub enum Policy {
-    Unlimited,
-    LocalOnly,
+pub enum SubscriberCondition {
+    HasBalance,
+    NoBalance,
 }
 
 struct PolicyUpdateMessage {
-    new_policy: Policy,
+    new_state: SubscriberCondition,
     target: UserId,
     out_channel: tokio::sync::oneshot::Sender<Result<(), EnforcementError>>,
 }
@@ -198,7 +198,7 @@ async fn enforce_via_iptables(
                 .unwrap();
         }
 
-        match sub.ul_policy {
+        match sub.backhaul_ul_policy {
             RateLimitPolicy::Unlimited => {
                 match &upstream_interface {
                     None => {
@@ -236,7 +236,7 @@ async fn enforce_via_iptables(
             }
         }
 
-        match sub.dl_policy {
+        match sub.backhaul_dl_policy {
             RateLimitPolicy::Unlimited => {
                 clear_user_limit(&subscriber_interface, &sub_limit_state.qdisc_handle, &log)
                     .await
@@ -267,7 +267,7 @@ async fn enforce_via_iptables(
                     });
                 for sub in reenabled_subs {
                     //TODO(matt9j) Check policy type
-                    set_policy(sub.subscriber_id, Policy::Unlimited, &db_pool, &log)
+                    set_policy(sub.subscriber_id, SubscriberCondition::HasBalance, &db_pool, &log)
                         .await
                         .unwrap_or_else(|e| {
                             slog::error!(log, "Unable to reenable subscriber"; "id" => sub.subscriber_id, "error" => e.to_string())
@@ -280,12 +280,14 @@ async fn enforce_via_iptables(
                 }
                 let message = message.unwrap();
 
-                let result = set_policy(message.target, message.new_policy, &db_pool, &log).await;
+                let result = set_policy(message.target, message.new_state, &db_pool, &log).await;
                 message.out_channel.send(result).unwrap();
             }
         }
     }
 }
+
+//TODO async fn apply_subscriber_policy(upstream_iface: Option<String>, downstream_iface: Option<String>, )
 
 async fn forwarding_reject_rule_present(addr: &std::net::IpAddr) -> Result<bool, std::io::Error> {
     // IPTables holds state outside the lifetime of this program. The `-C`
@@ -302,13 +304,13 @@ async fn forwarding_reject_rule_present(addr: &std::net::IpAddr) -> Result<bool,
 
 async fn set_policy(
     target: UserId,
-    policy: Policy,
+    policy: SubscriberCondition,
     db_pool: &sqlx::PgPool,
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
     match policy {
-        Policy::Unlimited => set_unlimited_policy(&db_pool, target, &log).await,
-        Policy::LocalOnly => set_local_only_policy(&db_pool, target, &log).await,
+        SubscriberCondition::HasBalance => set_unlimited_policy(&db_pool, target, &log).await,
+        SubscriberCondition::NoBalance => set_local_only_policy(&db_pool, target, &log).await,
     }
 }
 
@@ -813,25 +815,51 @@ async fn query_all_subscriber_ratelimit_state(
     db_pool: &sqlx::PgPool,
     log: &slog::Logger,
 ) -> Result<Vec<SubscriberRateLimitInfo>, EnforcementError> {
-    let mut transaction = db_pool.begin().await?;
     slog::debug!(log, "querying global ratelimit db state");
+    let mut transaction = db_pool.begin().await?;
 
+    // Get the ratelimit state to apply for each condition of subscribers. Need
+    // to return different columns based on the subscriber's account balance (or
+    // possibly other conditions in the future).
+
+    // Zero balance subscribers
     let ratelimit_state_query = r#"
-        SELECT "internal_uid" AS "subscriber_id", "ip", "ul_limit_policy", "dl_limit_policy", "ul_limit_policy_parameters", "dl_limit_policy_parameters"
+        SELECT "internal_uid" AS "subscriber_id", "ip", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
         FROM subscribers
         INNER JOIN static_ips ON subscribers.imsi = static_ips.imsi
+        INNER JOIN access_policies ON subscribers.zero_balance_policy = access_policies.id
+        WHERE (subscribers.data_balance = 0)
     "#;
 
-    let rows: Vec<SubscriberRateLimitRow> = sqlx::query_as(ratelimit_state_query)
+    let zero_balance_rows: Vec<SubscriberRateLimitRow> = sqlx::query_as(ratelimit_state_query)
         .fetch_all(&mut transaction)
         .await?;
 
+    // Positive balance subscribers
+    let ratelimit_state_query = r#"
+        SELECT "internal_uid" AS "subscriber_id", "ip", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
+        FROM subscribers
+        INNER JOIN static_ips ON subscribers.imsi = static_ips.imsi
+        INNER JOIN access_policies ON subscribers.positive_balance_policy = access_policies.id
+        WHERE (subscribers.data_balance > 0)
+    "#;
+
+    let positive_balance_rows: Vec<SubscriberRateLimitRow> = sqlx::query_as(ratelimit_state_query)
+        .fetch_all(&mut transaction)
+        .await?;
+
+    transaction.commit().await?;
+
+    // Once rows are retreived, parse them into our internal representation.
     let mut parsed_ratelimits: Vec<SubscriberRateLimitInfo> = Vec::new();
-    for row in rows.iter() {
+    parsed_ratelimits.reserve_exact(zero_balance_rows.len() + positive_balance_rows.len());
+    for row in zero_balance_rows.iter() {
+        parsed_ratelimits.push(row.try_into()?)
+    }
+    for row in positive_balance_rows.iter() {
         parsed_ratelimits.push(row.try_into()?)
     }
 
-    transaction.commit().await?;
     Ok(parsed_ratelimits)
 }
 
@@ -903,10 +931,14 @@ struct LimitPolicyParameters {
 struct SubscriberRateLimitRow {
     ip: ipnetwork::IpNetwork,
     subscriber_id: i32,
-    ul_limit_policy: i32,
-    dl_limit_policy: i32,
-    ul_limit_policy_parameters: sqlx::types::Json<LimitPolicyParameters>,
-    dl_limit_policy_parameters: sqlx::types::Json<LimitPolicyParameters>,
+    local_ul_policy_kind: i32,
+    local_ul_policy_parameters: sqlx::types::Json<LimitPolicyParameters>,
+    local_dl_policy_kind: i32,
+    local_dl_policy_parameters: sqlx::types::Json<LimitPolicyParameters>,
+    backhaul_ul_policy_kind: i32,
+    backhaul_ul_policy_parameters: sqlx::types::Json<LimitPolicyParameters>,
+    backhaul_dl_policy_kind: i32,
+    backhaul_dl_policy_parameters: sqlx::types::Json<LimitPolicyParameters>,
 }
 
 #[derive(Debug, Clone)]
@@ -924,8 +956,10 @@ enum RateLimitPolicy {
 struct SubscriberRateLimitInfo {
     ip: ipnetwork::IpNetwork,
     subscriber_id: i32,
-    ul_policy: RateLimitPolicy,
-    dl_policy: RateLimitPolicy,
+    local_ul_policy: RateLimitPolicy,
+    local_dl_policy: RateLimitPolicy,
+    backhaul_ul_policy: RateLimitPolicy,
+    backhaul_dl_policy: RateLimitPolicy,
 }
 
 fn create_policy_from_parameters(
@@ -953,13 +987,21 @@ impl TryFrom<&SubscriberRateLimitRow> for SubscriberRateLimitInfo {
         Ok(SubscriberRateLimitInfo {
             ip: row.ip,
             subscriber_id: row.subscriber_id,
-            ul_policy: create_policy_from_parameters(
-                row.ul_limit_policy,
-                &row.ul_limit_policy_parameters,
+            local_ul_policy: create_policy_from_parameters(
+                row.local_ul_policy_kind,
+                &row.local_ul_policy_parameters,
             )?,
-            dl_policy: create_policy_from_parameters(
-                row.dl_limit_policy,
-                &row.dl_limit_policy_parameters,
+            local_dl_policy: create_policy_from_parameters(
+                row.local_dl_policy_kind,
+                &row.local_dl_policy_parameters,
+            )?,
+            backhaul_ul_policy: create_policy_from_parameters(
+                row.backhaul_ul_policy_kind,
+                &row.backhaul_ul_policy_parameters,
+            )?,
+            backhaul_dl_policy: create_policy_from_parameters(
+                row.backhaul_dl_policy_kind,
+                &row.backhaul_dl_policy_parameters,
             )?,
         })
     }

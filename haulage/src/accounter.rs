@@ -115,7 +115,7 @@ async fn accounting_worker(
                         // Detect if the subscriber's balance has gone negative after synchronizing with the DB
                         if (new_state.data_balance <= 0) && (balance > 0) {
                             enforcer
-                                .update_policy(subscriber_id, crate::enforcer::Policy::LocalOnly)
+                                .update_policy(subscriber_id, crate::enforcer::SubscriberCondition::NoBalance)
                                 .await
                                 .unwrap_or_else(
                                     |e| slog::error!(log, "Unable to update policy for zero balance sub"; "error" => e.to_string())
@@ -147,7 +147,7 @@ async fn accounting_worker(
                                     // Handle the transition to zero balance
                                     if (new_state.data_balance <= 0) && (balance > 0) {
                                         enforcer
-                                            .update_policy(subscriber_id, crate::enforcer::Policy::LocalOnly)
+                                            .update_policy(subscriber_id, crate::enforcer::SubscriberCondition::NoBalance)
                                             .await
                                             .unwrap_or_else(
                                                 |e| slog::error!(log, "Unable to update policy for zero balance sub"; "error" => e.to_string())
