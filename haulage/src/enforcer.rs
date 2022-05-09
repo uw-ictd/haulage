@@ -82,7 +82,7 @@ impl Iptables {
 }
 
 pub enum SubscriberCondition {
-    HasBalance,
+    PositiveBalance,
     NoBalance,
 }
 
@@ -100,40 +100,13 @@ async fn enforce_via_iptables(
     db_pool: std::sync::Arc<sqlx::PgPool>,
     log: slog::Logger,
 ) -> () {
+    // Track local ephemeral state per subscriber in an in-memory table
+    //
     // Issue handle ids to subscribers on a first-come first-serve basis. In
     // this initial low-scale implementation don't try to reclaim IDs while
     // operating.
     let mut next_handle_id = 1;
     let mut subscriber_limit_control_state = HashMap::<i32, SubscriberControlState>::new();
-
-    // On startup synchronize the state in the database with the local iptables
-    // rules. This is not very robust, and would be better integrated with
-    // actual netfilter tables for efficiency and better control of the actual
-    // state of the rules present when other firewalls my also be active.
-    let current_db_state = query_all_subscriber_bridge_state(&db_pool, &log)
-        .await
-        .expect("Unable to get initial desired iptables state!");
-
-    for sub in current_db_state {
-        let sub_handle = format!("{:03X}", next_handle_id);
-        next_handle_id += 1;
-        subscriber_limit_control_state.insert(
-            sub.subscriber_id,
-            SubscriberControlState {
-                qdisc_handle: sub_handle,
-                ip: sub.ip,
-            },
-        );
-        if sub.bridged {
-            delete_forwarding_reject_rule(&sub.ip.ip(), &log)
-                .await
-                .unwrap();
-        } else {
-            set_forwarding_reject_rule(&sub.ip.ip(), &log)
-                .await
-                .unwrap();
-        }
-    }
 
     // Clear any existing queuing disciplines on startup.
     clear_interface_limit(&subscriber_interface, &log)
@@ -152,11 +125,17 @@ async fn enforce_via_iptables(
             .unwrap();
     }
 
-    let current_db_state = query_all_subscriber_ratelimit_state(&db_pool, &log)
+    // On startup synchronize the state in the database with the local iptables
+    // rules and qdisc configuration. This is not very robust, and would be
+    // better integrated with actual netfilter tables for efficiency and better
+    // control of the actual state of the rules present when other firewalls may
+    // also be active.
+    let current_db_state = query_all_subscriber_access_state(&db_pool, &log)
         .await
-        .expect("Unable to get initial ratelimit state");
+        .expect("Unable to get initial access policy state");
+
     for sub in current_db_state {
-        // TODO Match subscriber to control state
+        // Assign ephemeral state to each subscriber
         let sub_limit_state = subscriber_limit_control_state.get(&sub.subscriber_id);
         let sub_limit_state = match sub_limit_state {
             Some(state) => state,
@@ -200,61 +179,17 @@ async fn enforce_via_iptables(
                 .unwrap();
         }
 
-        match sub.backhaul_ul_policy {
-            RateLimitPolicy::Unlimited => {
-                match &upstream_interface {
-                    None => {
-                        slog::warn!(
-                            log,
-                            "No 'upstreamInterface' configured, not modifying queues for unlimited rate limit policy!"
-                        );
-                    }
-                    Some(upstream_if) => {
-                        clear_user_limit(upstream_if, &sub_limit_state.qdisc_handle, &log)
-                            .await
-                            .unwrap();
-                    }
-                };
-            }
-            RateLimitPolicy::TokenBucket(params) => {
-                match &upstream_interface {
-                    None => {
-                        slog::error!(
-                            log,
-                            "Cannot set uplink TokenBucket rate limit policy without 'upstreamInterface' config!"
-                        );
-                    }
-                    Some(upstream_if) => {
-                        set_user_token_bucket(
-                            upstream_if,
-                            &sub_limit_state.qdisc_handle,
-                            params,
-                            &log,
-                        )
-                        .await
-                        .unwrap();
-                    }
-                };
-            }
-        }
-
-        match sub.backhaul_dl_policy {
-            RateLimitPolicy::Unlimited => {
-                clear_user_limit(&subscriber_interface, &sub_limit_state.qdisc_handle, &log)
-                    .await
-                    .unwrap();
-            }
-            RateLimitPolicy::TokenBucket(params) => {
-                set_user_token_bucket(
-                    &subscriber_interface,
-                    &sub_limit_state.qdisc_handle,
-                    params,
-                    &log,
-                )
-                .await
-                .unwrap();
-            }
-        }
+        set_policy(
+            sub.subscriber_id,
+            sub_limit_state,
+            &sub,
+            &upstream_interface,
+            &subscriber_interface,
+            &db_pool,
+            &log,
+        )
+        .await
+        .expect("Unable to set initial subscriber policy");
     }
 
     let mut timer = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
@@ -268,8 +203,28 @@ async fn enforce_via_iptables(
                         Vec::<SubscriberBridgeInfo>::new()
                     });
                 for sub in reenabled_subs {
+                    let sub_limit_state = subscriber_limit_control_state.get(&sub.subscriber_id);
+                    let sub_limit_state = match sub_limit_state {
+                        Some(state) => state,
+                        None => {
+                            let sub_handle = format!("{:03X}", next_handle_id);
+                            next_handle_id += 1;
+                            subscriber_limit_control_state.insert(
+                                sub.subscriber_id,
+                                SubscriberControlState {
+                                    qdisc_handle: sub_handle,
+                                    ip: sub.ip,
+                                },
+                            );
+                            subscriber_limit_control_state
+                                .get(&sub.subscriber_id)
+                                .expect("Unable to retrieve key just inserted")
+                        }
+                    };
+
+
                     //TODO(matt9j) Check policy type
-                    set_policy(sub.subscriber_id, SubscriberCondition::HasBalance, &db_pool, &log)
+                    set_policy_for_condition(sub.subscriber_id, &sub_limit_state, SubscriberCondition::PositiveBalance, &upstream_interface, &subscriber_interface, &db_pool, &log)
                         .await
                         .unwrap_or_else(|e| {
                             slog::error!(log, "Unable to reenable subscriber"; "id" => sub.subscriber_id, "error" => e.to_string())
@@ -282,14 +237,31 @@ async fn enforce_via_iptables(
                 }
                 let message = message.unwrap();
 
-                let result = set_policy(message.target, message.new_state, &db_pool, &log).await;
+                let sub_limit_state = subscriber_limit_control_state.get(&message.target);
+                let sub_limit_state = match sub_limit_state {
+                    Some(state) => state,
+                    None => {
+                        let sub_handle = format!("{:03X}", next_handle_id);
+                        next_handle_id += 1;
+                        subscriber_limit_control_state.insert(
+                            message.target,
+                            SubscriberControlState {
+                                qdisc_handle: sub_handle,
+                                ip: query_subscriber_ip(message.target, &db_pool, &log).await.unwrap(),
+                            },
+                        );
+                        subscriber_limit_control_state
+                            .get(&message.target)
+                            .expect("Unable to retrieve key just inserted")
+                    }
+                };
+
+                let result = set_policy_for_condition(message.target, &sub_limit_state, message.new_state, &upstream_interface, &subscriber_interface, &db_pool, &log).await;
                 message.out_channel.send(result).unwrap();
             }
         }
     }
 }
-
-//TODO async fn apply_subscriber_policy(upstream_iface: Option<String>, downstream_iface: Option<String>, )
 
 async fn forwarding_reject_rule_present(addr: &std::net::IpAddr) -> Result<bool, std::io::Error> {
     // IPTables holds state outside the lifetime of this program. The `-C`
@@ -304,34 +276,108 @@ async fn forwarding_reject_rule_present(addr: &std::net::IpAddr) -> Result<bool,
     return Ok(false);
 }
 
+async fn set_policy_for_condition(
+    target: UserId,
+    subscriber_state: &SubscriberControlState,
+    condition: SubscriberCondition,
+    upstream_interface: &Option<String>,
+    subscriber_interface: &str,
+    db_pool: &sqlx::PgPool,
+    log: &slog::Logger,
+) -> Result<(), EnforcementError> {
+    let policy_to_apply = query_subscriber_access_policy(target, condition, db_pool, log).await?;
+
+    set_policy(
+        target,
+        subscriber_state,
+        &policy_to_apply,
+        upstream_interface,
+        subscriber_interface,
+        db_pool,
+        log,
+    )
+    .await
+}
+
 async fn set_policy(
     target: UserId,
-    policy: SubscriberCondition,
+    subscriber_state: &SubscriberControlState,
+    policy: &SubscriberAccessInfo,
+    upstream_interface: &Option<String>,
+    subscriber_interface: &str,
     db_pool: &sqlx::PgPool,
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
-    match policy {
-        SubscriberCondition::HasBalance => set_unlimited_policy(&db_pool, target, &log).await,
-        SubscriberCondition::NoBalance => set_local_only_policy(&db_pool, target, &log).await,
+    // Apply policy across interfaces
+    match &policy.backhaul_ul_policy {
+        AccessPolicy::Unlimited => {
+            match &upstream_interface {
+                None => {
+                    slog::warn!(
+                        log,
+                        "No 'upstreamInterface' configured, not modifying queues for unlimited rate limit policy!"
+                    );
+                }
+                Some(upstream_if) => {
+                    clear_user_limit(upstream_if, &subscriber_state.qdisc_handle, &log)
+                        .await
+                        .unwrap();
+                }
+            };
+        }
+        AccessPolicy::Block => {
+            // Partially implemented-- currently no difference between
+            // uplink and downlink block/allow policies, so set/unset
+            // forwarding as part of the downlink policy only.
+        }
+        AccessPolicy::TokenBucket(params) => {
+            match &upstream_interface {
+                None => {
+                    slog::error!(
+                        log,
+                        "Cannot set uplink TokenBucket rate limit policy without 'upstreamInterface' config!"
+                    );
+                }
+                Some(upstream_if) => {
+                    set_user_token_bucket(
+                        upstream_if,
+                        &subscriber_state.qdisc_handle,
+                        params,
+                        &log,
+                    )
+                    .await
+                    .unwrap();
+                }
+            };
+        }
     }
-}
 
-async fn set_unlimited_policy(
-    db_pool: &sqlx::PgPool,
-    target: UserId,
-    log: &slog::Logger,
-) -> Result<(), EnforcementError> {
-    let bridge_state = update_bridged(&db_pool, target, true, log).await?;
-    delete_forwarding_reject_rule(&bridge_state.ip.ip(), log).await
-}
-
-async fn set_local_only_policy(
-    db_pool: &sqlx::PgPool,
-    target: UserId,
-    log: &slog::Logger,
-) -> Result<(), EnforcementError> {
-    let bridge_state = update_bridged(&db_pool, target, false, log).await?;
-    set_forwarding_reject_rule(&bridge_state.ip.ip(), log).await
+    match &policy.backhaul_dl_policy {
+        AccessPolicy::Unlimited => {
+            let bridge_state = update_bridged(&db_pool, target, true, log).await?;
+            delete_forwarding_reject_rule(&subscriber_state.ip.ip(), &log)
+                .await
+                .unwrap();
+            clear_user_limit(&subscriber_interface, &subscriber_state.qdisc_handle, &log).await
+        }
+        AccessPolicy::Block => {
+            let bridge_state = update_bridged(&db_pool, target, false, log).await?;
+            set_forwarding_reject_rule(&subscriber_state.ip.ip(), &log).await
+        }
+        AccessPolicy::TokenBucket(params) => {
+            let bridge_state = update_bridged(&db_pool, target, true, log).await?;
+            delete_forwarding_reject_rule(&subscriber_state.ip.ip(), &log)
+                .await
+                .unwrap();
+            set_user_token_bucket(
+                &subscriber_interface,
+                &subscriber_state.qdisc_handle,
+                params,
+                &log,
+            )
+            .await
+        }
+    }
 }
 
 async fn delete_forwarding_reject_rule(
@@ -350,7 +396,9 @@ async fn delete_forwarding_reject_rule(
 
     if !command_output.status.success() {
         slog::error!(log, "iptables delete forward reject rule failed"; "ip" => ip.to_string());
-        return Err(EnforcementError::IptablesLogicError(String::from_utf8(command_output.stderr).unwrap()));
+        return Err(EnforcementError::IptablesLogicError(
+            String::from_utf8(command_output.stderr).unwrap(),
+        ));
     }
 
     Ok(())
@@ -626,7 +674,7 @@ async fn clear_user_limit(
 async fn set_user_token_bucket(
     iface: &str,
     sub_handle: &str,
-    params: TokenBucketParameters,
+    params: &TokenBucketParameters,
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
     slog::debug!(log, "setting token bucket limit"; "interface" => iface, "sub_handle" => sub_handle);
@@ -819,10 +867,80 @@ async fn update_bridged(
     Ok(user_state)
 }
 
-async fn query_all_subscriber_ratelimit_state(
+async fn query_subscriber_ip(
+    subscriber_id: UserId,
     db_pool: &sqlx::PgPool,
     log: &slog::Logger,
-) -> Result<Vec<SubscriberRateLimitInfo>, EnforcementError> {
+) -> Result<ipnetwork::IpNetwork, EnforcementError> {
+    slog::debug!(log, "querying subscriber ip");
+    let mut transaction = db_pool.begin().await?;
+
+    let ip_query = r#"
+        SELECT "ip"
+        FROM subscribers
+        INNER JOIN static_ips ON subscribers.imsi = static_ips.imsi
+        WHERE (subscribers.internal_uid = $1)
+    "#;
+
+    let ip_rows: Vec<SubscriberIpRow> = sqlx::query_as(ip_query)
+        .bind(subscriber_id)
+        .fetch_all(&mut transaction)
+        .await?;
+
+    transaction.commit().await?;
+
+    if ip_rows.len() != 1 {
+        return Err(EnforcementError::UserIdError);
+    }
+
+    Ok(ip_rows.first().unwrap().ip)
+}
+
+async fn query_subscriber_access_policy(
+    subscriber_id: UserId,
+    condition: SubscriberCondition,
+    db_pool: &sqlx::PgPool,
+    log: &slog::Logger,
+) -> Result<SubscriberAccessInfo, EnforcementError> {
+    let ratelimit_state_query = match condition {
+        SubscriberCondition::PositiveBalance => {
+            r#"
+                SELECT "internal_uid" AS "subscriber_id", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
+                FROM subscribers
+                INNER JOIN access_policies ON subscribers.positive_balance_policy = access_policies.id
+                WHERE subscriber_id = $1)
+            "#
+        }
+        SubscriberCondition::NoBalance => {
+            r#"
+                SELECT "internal_uid" AS "subscriber_id", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
+                FROM subscribers
+                INNER JOIN access_policies ON subscribers.zero_balance_policy = access_policies.id
+                WHERE subscriber_id = $1)
+            "#
+        }
+    };
+
+    let mut transaction = db_pool.begin().await?;
+    let policy_rows: Vec<SubscriberAccessPolicyRow> = sqlx::query_as(ratelimit_state_query)
+        .bind(subscriber_id)
+        .fetch_all(&mut transaction)
+        .await?;
+
+    transaction.commit().await?;
+
+    if policy_rows.len() != 1 {
+        return Err(EnforcementError::UserIdError);
+    }
+
+    let parsed_access_info: SubscriberAccessInfo = policy_rows.first().unwrap().try_into()?;
+    Ok(parsed_access_info)
+}
+
+async fn query_all_subscriber_access_state(
+    db_pool: &sqlx::PgPool,
+    log: &slog::Logger,
+) -> Result<Vec<SubscriberAccessInfo>, EnforcementError> {
     slog::debug!(log, "querying global ratelimit db state");
     let mut transaction = db_pool.begin().await?;
 
@@ -839,7 +957,7 @@ async fn query_all_subscriber_ratelimit_state(
         WHERE (subscribers.data_balance = 0)
     "#;
 
-    let zero_balance_rows: Vec<SubscriberRateLimitRow> = sqlx::query_as(ratelimit_state_query)
+    let zero_balance_rows: Vec<SubscriberAccessPolicyRow> = sqlx::query_as(ratelimit_state_query)
         .fetch_all(&mut transaction)
         .await?;
 
@@ -852,14 +970,15 @@ async fn query_all_subscriber_ratelimit_state(
         WHERE (subscribers.data_balance > 0)
     "#;
 
-    let positive_balance_rows: Vec<SubscriberRateLimitRow> = sqlx::query_as(ratelimit_state_query)
-        .fetch_all(&mut transaction)
-        .await?;
+    let positive_balance_rows: Vec<SubscriberAccessPolicyRow> =
+        sqlx::query_as(ratelimit_state_query)
+            .fetch_all(&mut transaction)
+            .await?;
 
     transaction.commit().await?;
 
     // Once rows are retreived, parse them into our internal representation.
-    let mut parsed_ratelimits: Vec<SubscriberRateLimitInfo> = Vec::new();
+    let mut parsed_ratelimits: Vec<SubscriberAccessInfo> = Vec::new();
     parsed_ratelimits.reserve_exact(zero_balance_rows.len() + positive_balance_rows.len());
     for row in zero_balance_rows.iter() {
         parsed_ratelimits.push(row.try_into()?)
@@ -936,7 +1055,7 @@ struct LimitPolicyParameters {
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
-struct SubscriberRateLimitRow {
+struct SubscriberAccessPolicyRow {
     ip: ipnetwork::IpNetwork,
     subscriber_id: i32,
     local_ul_policy_kind: i32,
@@ -949,50 +1068,57 @@ struct SubscriberRateLimitRow {
     backhaul_dl_policy_parameters: sqlx::types::Json<LimitPolicyParameters>,
 }
 
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct SubscriberIpRow {
+    ip: ipnetwork::IpNetwork,
+}
+
 #[derive(Debug, Clone)]
 struct TokenBucketParameters {
     rate_kibps: u32,
 }
 
 #[derive(Debug, Clone)]
-enum RateLimitPolicy {
+enum AccessPolicy {
     Unlimited,
+    Block,
     TokenBucket(TokenBucketParameters),
 }
 
 #[derive(Debug, Clone)]
-struct SubscriberRateLimitInfo {
+struct SubscriberAccessInfo {
     ip: ipnetwork::IpNetwork,
     subscriber_id: i32,
-    local_ul_policy: RateLimitPolicy,
-    local_dl_policy: RateLimitPolicy,
-    backhaul_ul_policy: RateLimitPolicy,
-    backhaul_dl_policy: RateLimitPolicy,
+    local_ul_policy: AccessPolicy,
+    local_dl_policy: AccessPolicy,
+    backhaul_ul_policy: AccessPolicy,
+    backhaul_dl_policy: AccessPolicy,
 }
 
 fn create_policy_from_parameters(
     policy_id: i32,
     parameters: &LimitPolicyParameters,
-) -> Result<RateLimitPolicy, EnforcementError> {
+) -> Result<AccessPolicy, EnforcementError> {
     match policy_id {
-        1 => Ok(RateLimitPolicy::Unlimited),
-        2 => {
+        1 => Ok(AccessPolicy::Unlimited),
+        2 => Ok(AccessPolicy::Block),
+        3 => {
             let parsed_parameters = TokenBucketParameters {
                 rate_kibps: parameters.rate_kibps.ok_or(
                     EnforcementError::RateLimitParameterError("Missing rate_kibps".to_owned()),
                 )?,
             };
-            Ok(RateLimitPolicy::TokenBucket(parsed_parameters))
+            Ok(AccessPolicy::TokenBucket(parsed_parameters))
         }
         _ => Err(EnforcementError::RateLimitPolicyError(policy_id)),
     }
 }
 
-impl TryFrom<&SubscriberRateLimitRow> for SubscriberRateLimitInfo {
+impl TryFrom<&SubscriberAccessPolicyRow> for SubscriberAccessInfo {
     type Error = EnforcementError;
 
-    fn try_from(row: &SubscriberRateLimitRow) -> Result<Self, Self::Error> {
-        Ok(SubscriberRateLimitInfo {
+    fn try_from(row: &SubscriberAccessPolicyRow) -> Result<Self, Self::Error> {
+        Ok(SubscriberAccessInfo {
             ip: row.ip,
             subscriber_id: row.subscriber_id,
             local_ul_policy: create_policy_from_parameters(
