@@ -115,13 +115,19 @@ async fn enforce_via_iptables(
         .unwrap();
 
     // Setup the root QFQ qdisc
-    setup_root_qdisc(&subscriber_interface, &log).await.unwrap();
+    setup_root_qdisc(&subscriber_interface, 0, &log)
+        .await
+        .unwrap();
 
     if upstream_interface.is_some() {
-        setup_root_qdisc(upstream_interface.as_ref().unwrap(), &log)
+        // Clear any existing queuing disciplines on startup.
+        clear_interface_limit(upstream_interface.as_ref().unwrap(), &log)
             .await
             .unwrap();
-        setup_fallback_class(upstream_interface.as_ref().unwrap(), &log)
+        setup_root_qdisc(upstream_interface.as_ref().unwrap(), 8, &log)
+            .await
+            .unwrap();
+        setup_fallback_class(upstream_interface.as_ref().unwrap(), 8, &log)
             .await
             .unwrap();
     }
@@ -157,11 +163,16 @@ async fn enforce_via_iptables(
         };
 
         // Setup subscriber qfq class
-        setup_subscriber_class(&subscriber_interface, &sub_limit_state.qdisc_handle, &log)
-            .await
-            .unwrap();
+        setup_subscriber_class(
+            &subscriber_interface,
+            0,
+            &sub_limit_state.qdisc_handle,
+            &log,
+        )
+        .await
+        .unwrap();
 
-        add_subscriber_dst_filter(&subscriber_interface, &sub_limit_state, &log)
+        add_subscriber_dst_filter(&subscriber_interface, 0, &sub_limit_state, &log)
             .await
             .unwrap();
 
@@ -169,15 +180,21 @@ async fn enforce_via_iptables(
             // Setup subscriber qfq class
             setup_subscriber_class(
                 upstream_interface.as_ref().unwrap(),
+                8,
                 &sub_limit_state.qdisc_handle,
                 &log,
             )
             .await
             .unwrap();
 
-            add_subscriber_src_filter(upstream_interface.as_ref().unwrap(), &sub_limit_state, &log)
-                .await
-                .unwrap();
+            add_subscriber_src_filter(
+                upstream_interface.as_ref().unwrap(),
+                8,
+                &sub_limit_state,
+                &log,
+            )
+            .await
+            .unwrap();
         }
 
         set_policy(
@@ -318,7 +335,7 @@ async fn set_policy(
                     );
                 }
                 Some(upstream_if) => {
-                    clear_user_limit(upstream_if, &subscriber_state.qdisc_handle, &log).await?;
+                    clear_user_limit(upstream_if, 8, &subscriber_state.qdisc_handle, &log).await?;
                 }
             };
         }
@@ -339,6 +356,7 @@ async fn set_policy(
                 Some(upstream_if) => {
                     set_user_token_bucket(
                         upstream_if,
+                        8,
                         &subscriber_state.qdisc_handle,
                         params,
                         &log,
@@ -352,7 +370,13 @@ async fn set_policy(
     match &policy.backhaul_dl_policy {
         AccessPolicy::Unlimited => {
             delete_forwarding_reject_rule(&subscriber_state.ip.ip(), &log).await?;
-            clear_user_limit(&subscriber_interface, &subscriber_state.qdisc_handle, &log).await?;
+            clear_user_limit(
+                &subscriber_interface,
+                0,
+                &subscriber_state.qdisc_handle,
+                &log,
+            )
+            .await?;
         }
         AccessPolicy::Block => {
             set_forwarding_reject_rule(&subscriber_state.ip.ip(), &log).await?;
@@ -361,6 +385,7 @@ async fn set_policy(
             delete_forwarding_reject_rule(&subscriber_state.ip.ip(), &log).await?;
             set_user_token_bucket(
                 &subscriber_interface,
+                0,
                 &subscriber_state.qdisc_handle,
                 params,
                 &log,
@@ -500,12 +525,24 @@ async fn clear_interface_limit(iface: &str, log: &slog::Logger) -> Result<(), En
     Ok(())
 }
 
-async fn setup_root_qdisc(iface: &str, log: &slog::Logger) -> Result<(), EnforcementError> {
+async fn setup_root_qdisc(
+    iface: &str,
+    id_offset: u8,
+    log: &slog::Logger,
+) -> Result<(), EnforcementError> {
     slog::debug!(log, "Setting up root qdisc"; "interface" => iface);
 
     let add_status = tokio::process::Command::new("tc")
         .args(&[
-            "qdisc", "replace", "dev", iface, "parent", "root", "handle", "1:", "qfq",
+            "qdisc",
+            "replace",
+            "dev",
+            iface,
+            "parent",
+            "root",
+            "handle",
+            &format!("{:X}:", id_offset + 1),
+            "qfq",
         ])
         .status()
         .await?;
@@ -519,6 +556,7 @@ async fn setup_root_qdisc(iface: &str, log: &slog::Logger) -> Result<(), Enforce
 
 async fn setup_subscriber_class(
     iface: &str,
+    id_offset: u8,
     sub_handle_fragment: &str,
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
@@ -527,13 +565,13 @@ async fn setup_subscriber_class(
     let add_status = tokio::process::Command::new("tc")
         .args(&[
             "class",
-            "replace",
+            "add",
             "dev",
             iface,
             "parent",
-            "1:",
+            &format!("{:X}:", id_offset + 1),
             "classid",
-            &format!("1:{}", sub_handle_fragment).as_str(),
+            &format!("{:X}:{}", id_offset + 1, sub_handle_fragment),
             "qfq",
             "weight",
             "10",
@@ -548,13 +586,13 @@ async fn setup_subscriber_class(
     let add_status = tokio::process::Command::new("tc")
         .args(&[
             "qdisc",
-            "replace",
+            "add",
             "dev",
             iface,
             "parent",
-            &format!("1:{}", sub_handle_fragment).as_str(),
+            &format!("{:X}:{}", id_offset + 1, sub_handle_fragment),
             "handle",
-            &format!("A{}:", sub_handle_fragment).as_str(),
+            &format!("{:X}{}:", id_offset + 6, sub_handle_fragment),
             "pfifo",
         ])
         .status()
@@ -567,13 +605,26 @@ async fn setup_subscriber_class(
     Ok(())
 }
 
-async fn setup_fallback_class(iface: &str, log: &slog::Logger) -> Result<(), EnforcementError> {
+async fn setup_fallback_class(
+    iface: &str,
+    id_offset: u8,
+    log: &slog::Logger,
+) -> Result<(), EnforcementError> {
     slog::debug!(log, "adding fallback class to base qdisc"; "interface" => iface);
 
     let add_status = tokio::process::Command::new("tc")
         .args(&[
-            "class", "replace", "dev", iface, "parent", "1:", "classid", "1:0xFFFF", "qfq",
-            "weight", "10",
+            "class",
+            "add",
+            "dev",
+            iface,
+            "parent",
+            &format!("{:X}:", id_offset + 1),
+            "classid",
+            &format!("{:X}:0xFFFF", id_offset + 1),
+            "qfq",
+            "weight",
+            "10",
         ])
         .status()
         .await?;
@@ -586,8 +637,23 @@ async fn setup_fallback_class(iface: &str, log: &slog::Logger) -> Result<(), Enf
 
     let add_status = tokio::process::Command::new("tc")
         .args(&[
-            "filter", "replace", "dev", iface, "parent", "1:", "protocol", "ip", "prio", "2",
-            "u32", "match", "u32", "0", "0", "flowid", "1:0xFFFF",
+            "filter",
+            "add",
+            "dev",
+            iface,
+            "parent",
+            &format!("{:X}:", id_offset + 1),
+            "protocol",
+            "ip",
+            "prio",
+            "2",
+            "u32",
+            "match",
+            "u32",
+            "0",
+            "0",
+            "flowid",
+            &format!("{:X}:0xFFFF", id_offset + 1),
         ])
         .status()
         .await?;
@@ -599,7 +665,15 @@ async fn setup_fallback_class(iface: &str, log: &slog::Logger) -> Result<(), Enf
     slog::debug!(log, "adding catchall_qdisc"; "interface" => iface);
     let add_status = tokio::process::Command::new("tc")
         .args(&[
-            "qdisc", "replace", "dev", iface, "parent", "1:0xFFFF", "handle", "0x1FFF", "fq_codel",
+            "qdisc",
+            "add",
+            "dev",
+            iface,
+            "parent",
+            &format!("{:X}:0xFFFF", id_offset + 1),
+            "handle",
+            &format!("0x{:X}FFF:", id_offset + 1),
+            "fq_codel",
         ])
         .status()
         .await?;
@@ -613,6 +687,7 @@ async fn setup_fallback_class(iface: &str, log: &slog::Logger) -> Result<(), Enf
 
 async fn clear_user_limit(
     iface: &str,
+    id_offset: u8,
     sub_handle: &str,
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
@@ -625,7 +700,7 @@ async fn clear_user_limit(
             "dev",
             iface,
             "parent",
-            &format!("1:{}", sub_handle).as_str(),
+            &format!("{:X}:{}", id_offset + 1, sub_handle),
         ])
         .status()
         .await?;
@@ -640,9 +715,9 @@ async fn clear_user_limit(
             "dev",
             iface,
             "parent",
-            &format!("1:{}", sub_handle).as_str(),
+            &format!("{:X}:{}", id_offset + 1, sub_handle),
             "handle",
-            &format!("A{}:", sub_handle).as_str(),
+            &format!("{:X}{}:", id_offset + 6, sub_handle),
             "sfq",
             "perturb",
             "30",
@@ -666,6 +741,7 @@ async fn clear_user_limit(
 
 async fn set_user_token_bucket(
     iface: &str,
+    id_offset: u8,
     sub_handle: &str,
     params: &TokenBucketParameters,
     log: &slog::Logger,
@@ -679,7 +755,7 @@ async fn set_user_token_bucket(
             "dev",
             iface,
             "parent",
-            &format!("1:{}", sub_handle).as_str(),
+            &format!("{:X}:{}", id_offset + 1, sub_handle),
         ])
         .status()
         .await?;
@@ -701,14 +777,14 @@ async fn set_user_token_bucket(
             "dev",
             iface,
             "parent",
-            &format!("1:{}", sub_handle).as_str(),
+            &format!("{:X}:{}", id_offset + 1, sub_handle),
             "handle",
-            &format!("2{}:", sub_handle).as_str(),
+            &format!("{:X}{}:", id_offset + 2, sub_handle),
             "tbf",
             "rate",
-            &format!("{}kbit", params.rate_kibps).as_str(),
+            &format!("{}kbit", params.rate_kibps),
             "burst",
-            &format!("{}kbit", burst_size_kbit).as_str(),
+            &format!("{}kbit", burst_size_kbit),
             "latency",
             "20ms",
         ])
@@ -726,9 +802,9 @@ async fn set_user_token_bucket(
             "dev",
             iface,
             "parent",
-            &format!("2{}:", sub_handle).as_str(),
+            &format!("{:X}{}:", id_offset + 2, sub_handle),
             "handle",
-            &format!("A{}:", sub_handle).as_str(),
+            &format!("{:X}{}:", id_offset + 6, sub_handle),
             "sfq",
             "perturb",
             "30",
@@ -752,6 +828,7 @@ async fn set_user_token_bucket(
 
 async fn add_subscriber_dst_filter(
     iface: &str,
+    id_offset: u8,
     sub: &SubscriberControlState,
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
@@ -761,11 +838,11 @@ async fn add_subscriber_dst_filter(
     let add_status = tokio::process::Command::new("tc")
         .args(&[
             "filter",
-            "replace",
+            "add",
             "dev",
             iface,
             "parent",
-            "1:",
+            &format!("{:X}:", id_offset + 1),
             "protocol",
             "ip",
             "prio",
@@ -776,7 +853,7 @@ async fn add_subscriber_dst_filter(
             "dst",
             &sub.ip.to_string(),
             "flowid",
-            &format!("1:{}", &sub.qdisc_handle).as_str(),
+            &format!("{:X}:{}", id_offset + 1, &sub.qdisc_handle),
         ])
         .status()
         .await?;
@@ -791,6 +868,7 @@ async fn add_subscriber_dst_filter(
 // TODO(matt9j) heavily duplicated with add_subscriber_dst_filter
 async fn add_subscriber_src_filter(
     iface: &str,
+    id_offset: u8,
     sub: &SubscriberControlState,
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
@@ -800,11 +878,11 @@ async fn add_subscriber_src_filter(
     let add_status = tokio::process::Command::new("tc")
         .args(&[
             "filter",
-            "replace",
+            "add",
             "dev",
             iface,
             "parent",
-            "1:",
+            &format!("{:X}:", id_offset + 1),
             "protocol",
             "ip",
             "prio",
@@ -815,7 +893,7 @@ async fn add_subscriber_src_filter(
             "src",
             &sub.ip.to_string(),
             "flowid",
-            &format!("1:{}", &sub.qdisc_handle).as_str(),
+            &format!("{:X}:{}", id_offset + 1, &sub.qdisc_handle),
         ])
         .status()
         .await?;
