@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 pub use i32 as UserId;
+use i32 as PolicyId;
 
 #[derive(Error, Debug)]
 pub enum EnforcementError {
@@ -196,11 +197,11 @@ async fn enforce_via_iptables(
     loop {
         tokio::select! {
             _ = timer.tick() => {
-                let reenabled_subs = query_reenabled_subscriber_bridge_state(&db_pool, &log)
+                let reenabled_subs = query_modified_subscriber_access_state(&db_pool, &log)
                     .await
                     .unwrap_or_else(|e| {
                         slog::error!(log, "Unable to query for reenabled subscribers"; "error" => e.to_string());
-                        Vec::<SubscriberBridgeInfo>::new()
+                        Vec::<SubscriberAccessInfo>::new()
                     });
                 for sub in reenabled_subs {
                     let sub_limit_state = subscriber_limit_control_state.get(&sub.subscriber_id);
@@ -222,9 +223,7 @@ async fn enforce_via_iptables(
                         }
                     };
 
-
-                    //TODO(matt9j) Check policy type
-                    set_policy_for_condition(sub.subscriber_id, &sub_limit_state, SubscriberCondition::PositiveBalance, &upstream_interface, &subscriber_interface, &db_pool, &log)
+                    set_policy(sub.subscriber_id, sub_limit_state, &sub, &upstream_interface, &subscriber_interface, &db_pool, &log)
                         .await
                         .unwrap_or_else(|e| {
                             slog::error!(log, "Unable to reenable subscriber"; "id" => sub.subscriber_id, "error" => e.to_string())
@@ -308,6 +307,8 @@ async fn set_policy(
     db_pool: &sqlx::PgPool,
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
+    update_current_policy(db_pool, target, policy.policy_id, log).await?;
+
     // Apply policy across interfaces
     match &policy.backhaul_ul_policy {
         AccessPolicy::Unlimited => {
@@ -354,18 +355,15 @@ async fn set_policy(
 
     match &policy.backhaul_dl_policy {
         AccessPolicy::Unlimited => {
-            let bridge_state = update_bridged(&db_pool, target, true, log).await?;
             delete_forwarding_reject_rule(&subscriber_state.ip.ip(), &log)
                 .await
                 .unwrap();
             clear_user_limit(&subscriber_interface, &subscriber_state.qdisc_handle, &log).await
         }
         AccessPolicy::Block => {
-            let bridge_state = update_bridged(&db_pool, target, false, log).await?;
             set_forwarding_reject_rule(&subscriber_state.ip.ip(), &log).await
         }
         AccessPolicy::TokenBucket(params) => {
-            let bridge_state = update_bridged(&db_pool, target, true, log).await?;
             delete_forwarding_reject_rule(&subscriber_state.ip.ip(), &log)
                 .await
                 .unwrap();
@@ -834,37 +832,33 @@ async fn add_subscriber_src_filter(
     Ok(())
 }
 
-async fn update_bridged(
+async fn update_current_policy(
     db_pool: &sqlx::PgPool,
     id: UserId,
-    new_bridge_state: bool,
+    new_policy: PolicyId,
     log: &slog::Logger,
-) -> Result<SubscriberBridgeInfo, EnforcementError> {
+) -> Result<SubscriberAccessInfo, EnforcementError> {
     let mut transaction = db_pool.begin().await?;
-    slog::debug!(log, "updating bridge state in DB"; "id" => id);
+    slog::debug!(log, "noting the currently applied policy in the DB"; "id" => id);
 
     let subscriber_update_query = r#"
         UPDATE subscribers
-        SET "bridged" = $1
-        FROM static_ips
-        WHERE static_ips.imsi = subscribers.imsi AND "internal_uid" = $2
-        RETURNING "ip", "internal_uid" AS "subscriber_id", "bridged";
+        SET "current_policy" = $1
+        FROM access_policies, static_ips
+        WHERE ("internal_uid" = $2) AND (subscribers.current_policy = access_policies.id) AND (subscribers.imsi = static_ips.imsi)
+        RETURNING "internal_uid" AS "subscriber_id", access_policies."id" AS "policy_id", "ip", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
     "#;
 
-    let rows: Vec<SubscriberBridgeInfo> = sqlx::query_as(subscriber_update_query)
-        .bind(new_bridge_state)
+    let policy_row: SubscriberAccessPolicyRow = sqlx::query_as(subscriber_update_query)
+        .bind(new_policy)
         .bind(id)
-        .fetch_all(&mut transaction)
+        .fetch_one(&mut transaction)
         .await?;
 
-    // Ensure the user is unique
-    if rows.len() != 1 {
-        return Err(EnforcementError::UserIdError);
-    }
-    let user_state = rows.first().unwrap().clone();
-
     transaction.commit().await?;
-    Ok(user_state)
+
+    let parsed_access_info: SubscriberAccessInfo = (&policy_row).try_into()?;
+    Ok(parsed_access_info)
 }
 
 async fn query_subscriber_ip(
@@ -902,10 +896,11 @@ async fn query_subscriber_access_policy(
     db_pool: &sqlx::PgPool,
     log: &slog::Logger,
 ) -> Result<SubscriberAccessInfo, EnforcementError> {
+    slog::debug!(log, "querying subscriber access policy");
     let ratelimit_state_query = match condition {
         SubscriberCondition::PositiveBalance => {
             r#"
-                SELECT "internal_uid" AS "subscriber_id", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
+                SELECT "internal_uid" AS "subscriber_id", "access_policies"."id" AS "policy_id", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
                 FROM subscribers
                 INNER JOIN access_policies ON subscribers.positive_balance_policy = access_policies.id
                 WHERE subscriber_id = $1)
@@ -913,7 +908,7 @@ async fn query_subscriber_access_policy(
         }
         SubscriberCondition::NoBalance => {
             r#"
-                SELECT "internal_uid" AS "subscriber_id", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
+                SELECT "internal_uid" AS "subscriber_id", "access_policies"."id" AS "policy_id", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
                 FROM subscribers
                 INNER JOIN access_policies ON subscribers.zero_balance_policy = access_policies.id
                 WHERE subscriber_id = $1)
@@ -950,7 +945,7 @@ async fn query_all_subscriber_access_state(
 
     // Zero balance subscribers
     let ratelimit_state_query = r#"
-        SELECT "internal_uid" AS "subscriber_id", "ip", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
+        SELECT "internal_uid" AS "subscriber_id", access_policies."id" AS "policy_id", "ip", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
         FROM subscribers
         INNER JOIN static_ips ON subscribers.imsi = static_ips.imsi
         INNER JOIN access_policies ON subscribers.zero_balance_policy = access_policies.id
@@ -963,7 +958,7 @@ async fn query_all_subscriber_access_state(
 
     // Positive balance subscribers
     let ratelimit_state_query = r#"
-        SELECT "internal_uid" AS "subscriber_id", "ip", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
+        SELECT "internal_uid" AS "subscriber_id", access_policies."id" AS "policy_id", "ip", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
         FROM subscribers
         INNER JOIN static_ips ON subscribers.imsi = static_ips.imsi
         INNER JOIN access_policies ON subscribers.positive_balance_policy = access_policies.id
@@ -990,45 +985,58 @@ async fn query_all_subscriber_access_state(
     Ok(parsed_ratelimits)
 }
 
-async fn query_all_subscriber_bridge_state(
+async fn query_modified_subscriber_access_state(
     db_pool: &sqlx::PgPool,
     log: &slog::Logger,
-) -> Result<Vec<SubscriberBridgeInfo>, EnforcementError> {
+) -> Result<Vec<SubscriberAccessInfo>, EnforcementError> {
     let mut transaction = db_pool.begin().await?;
-    slog::debug!(log, "querying global bridged db state");
+    slog::debug!(log, "querying subscribers with modified access state");
 
-    let bridge_state_query = r#"
-        SELECT "ip", "internal_uid" AS "subscriber_id", "bridged"
-        FROM subscribers INNER JOIN static_ips ON subscribers.imsi = static_ips.imsi
+    // Get the ratelimit state to apply for each condition of subscribers. Need
+    // to return different columns based on the subscriber's account balance (or
+    // possibly other conditions in the future).
+
+    // Zero balance subscribers
+    let ratelimit_state_updated_query = r#"
+        SELECT "internal_uid" AS "subscriber_id", access_policies."id" AS "policy_id", "ip", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
+        FROM subscribers
+        INNER JOIN static_ips ON subscribers.imsi = static_ips.imsi
+        INNER JOIN access_policies ON subscribers.zero_balance_policy = access_policies.id
+        WHERE (subscribers.data_balance = 0) AND (subscribers.zero_balance_policy != subscribers.current_policy)
     "#;
 
-    let rows: Vec<SubscriberBridgeInfo> = sqlx::query_as(bridge_state_query)
-        .fetch_all(&mut transaction)
-        .await?;
+    let zero_balance_rows: Vec<SubscriberAccessPolicyRow> =
+        sqlx::query_as(ratelimit_state_updated_query)
+            .fetch_all(&mut transaction)
+            .await?;
 
-    transaction.commit().await?;
-    Ok(rows)
-}
-
-async fn query_reenabled_subscriber_bridge_state(
-    db_pool: &sqlx::PgPool,
-    log: &slog::Logger,
-) -> Result<Vec<SubscriberBridgeInfo>, EnforcementError> {
-    let mut transaction = db_pool.begin().await?;
-    slog::debug!(log, "querying reenabled subscribers");
-
-    let bridge_state_query = r#"
-        SELECT "ip", "internal_uid" AS "subscriber_id", "bridged"
-        FROM subscribers INNER JOIN static_ips ON subscribers.imsi = static_ips.imsi
-        WHERE "data_balance" > 0 AND "bridged" = false
+    // Positive balance subscribers
+    let ratelimit_state_updated_query = r#"
+        SELECT "internal_uid" AS "subscriber_id", access_policies."id" AS "policy_id", "ip", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
+        FROM subscribers
+        INNER JOIN static_ips ON subscribers.imsi = static_ips.imsi
+        INNER JOIN access_policies ON subscribers.positive_balance_policy = access_policies.id
+        WHERE (subscribers.data_balance > 0) AND (subscribers.positive_balance_policy != subscribers.current_policy)
     "#;
 
-    let rows: Vec<SubscriberBridgeInfo> = sqlx::query_as(bridge_state_query)
-        .fetch_all(&mut transaction)
-        .await?;
+    let positive_balance_rows: Vec<SubscriberAccessPolicyRow> =
+        sqlx::query_as(ratelimit_state_updated_query)
+            .fetch_all(&mut transaction)
+            .await?;
 
     transaction.commit().await?;
-    Ok(rows)
+
+    // Once rows are retreived, parse them into our internal representation.
+    let mut parsed_ratelimits: Vec<SubscriberAccessInfo> = Vec::new();
+    parsed_ratelimits.reserve_exact(zero_balance_rows.len() + positive_balance_rows.len());
+    for row in zero_balance_rows.iter() {
+        parsed_ratelimits.push(row.try_into()?)
+    }
+    for row in positive_balance_rows.iter() {
+        parsed_ratelimits.push(row.try_into()?)
+    }
+
+    Ok(parsed_ratelimits)
 }
 
 #[derive(Debug)]
@@ -1042,13 +1050,6 @@ struct QDiscInfo {
     handle: String,
 }
 
-#[derive(Debug, Clone, sqlx::FromRow)]
-struct SubscriberBridgeInfo {
-    ip: ipnetwork::IpNetwork,
-    subscriber_id: i32,
-    bridged: bool,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 struct LimitPolicyParameters {
     rate_kibps: Option<u32>,
@@ -1058,6 +1059,7 @@ struct LimitPolicyParameters {
 struct SubscriberAccessPolicyRow {
     ip: ipnetwork::IpNetwork,
     subscriber_id: i32,
+    policy_id: i32,
     local_ul_policy_kind: i32,
     local_ul_policy_parameters: sqlx::types::Json<LimitPolicyParameters>,
     local_dl_policy_kind: i32,
@@ -1089,6 +1091,7 @@ enum AccessPolicy {
 struct SubscriberAccessInfo {
     ip: ipnetwork::IpNetwork,
     subscriber_id: i32,
+    policy_id: i32,
     local_ul_policy: AccessPolicy,
     local_dl_policy: AccessPolicy,
     backhaul_ul_policy: AccessPolicy,
@@ -1096,10 +1099,10 @@ struct SubscriberAccessInfo {
 }
 
 fn create_policy_from_parameters(
-    policy_id: i32,
+    policy_kind_id: i32,
     parameters: &LimitPolicyParameters,
 ) -> Result<AccessPolicy, EnforcementError> {
-    match policy_id {
+    match policy_kind_id {
         1 => Ok(AccessPolicy::Unlimited),
         2 => Ok(AccessPolicy::Block),
         3 => {
@@ -1110,7 +1113,7 @@ fn create_policy_from_parameters(
             };
             Ok(AccessPolicy::TokenBucket(parsed_parameters))
         }
-        _ => Err(EnforcementError::RateLimitPolicyError(policy_id)),
+        _ => Err(EnforcementError::RateLimitPolicyError(policy_kind_id)),
     }
 }
 
@@ -1121,6 +1124,7 @@ impl TryFrom<&SubscriberAccessPolicyRow> for SubscriberAccessInfo {
         Ok(SubscriberAccessInfo {
             ip: row.ip,
             subscriber_id: row.subscriber_id,
+            policy_id: row.policy_id,
             local_ul_policy: create_policy_from_parameters(
                 row.local_ul_policy_kind,
                 &row.local_ul_policy_parameters,
