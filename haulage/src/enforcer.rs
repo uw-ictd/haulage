@@ -282,16 +282,13 @@ async fn enforce_via_iptables(
 async fn forwarding_reject_rule_present(addr: &std::net::IpAddr) -> Result<bool, std::io::Error> {
     // IPTables holds state outside the lifetime of this program. The `-C`
     // option will return success if the rule is present, and 1 if it is not.
-    let status = tokio::process::Command::new("iptables")
+    let output = tokio::process::Command::new("iptables")
         .args(&["-C", "FORWARD", "-s", &addr.to_string(), "-j", "REJECT"])
-        .status()
+        .output()
         .await?;
-    if status.success() {
-        return Ok(true);
-    }
-    return Ok(false);
-}
 
+    Ok(output.status.success())
+}
 async fn set_policy_for_condition(
     target: UserId,
     subscriber_state: &SubscriberControlState,
