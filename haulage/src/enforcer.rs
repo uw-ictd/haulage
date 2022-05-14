@@ -307,8 +307,6 @@ async fn set_policy(
     db_pool: &sqlx::PgPool,
     log: &slog::Logger,
 ) -> Result<(), EnforcementError> {
-    update_current_policy(db_pool, target, policy.policy_id, log).await?;
-
     // Apply policy across interfaces
     match &policy.backhaul_ul_policy {
         AccessPolicy::Unlimited => {
@@ -320,9 +318,7 @@ async fn set_policy(
                     );
                 }
                 Some(upstream_if) => {
-                    clear_user_limit(upstream_if, &subscriber_state.qdisc_handle, &log)
-                        .await
-                        .unwrap();
+                    clear_user_limit(upstream_if, &subscriber_state.qdisc_handle, &log).await?;
                 }
             };
         }
@@ -338,6 +334,7 @@ async fn set_policy(
                         log,
                         "Cannot set uplink TokenBucket rate limit policy without 'upstreamInterface' config!"
                     );
+                    return Err(EnforcementError::RateLimitPolicyError(policy.policy_id));
                 }
                 Some(upstream_if) => {
                     set_user_token_bucket(
@@ -346,8 +343,7 @@ async fn set_policy(
                         params,
                         &log,
                     )
-                    .await
-                    .unwrap();
+                    .await?;
                 }
             };
         }
@@ -355,27 +351,26 @@ async fn set_policy(
 
     match &policy.backhaul_dl_policy {
         AccessPolicy::Unlimited => {
-            delete_forwarding_reject_rule(&subscriber_state.ip.ip(), &log)
-                .await
-                .unwrap();
-            clear_user_limit(&subscriber_interface, &subscriber_state.qdisc_handle, &log).await
+            delete_forwarding_reject_rule(&subscriber_state.ip.ip(), &log).await?;
+            clear_user_limit(&subscriber_interface, &subscriber_state.qdisc_handle, &log).await?;
         }
         AccessPolicy::Block => {
-            set_forwarding_reject_rule(&subscriber_state.ip.ip(), &log).await
+            set_forwarding_reject_rule(&subscriber_state.ip.ip(), &log).await?;
         }
         AccessPolicy::TokenBucket(params) => {
-            delete_forwarding_reject_rule(&subscriber_state.ip.ip(), &log)
-                .await
-                .unwrap();
+            delete_forwarding_reject_rule(&subscriber_state.ip.ip(), &log).await?;
             set_user_token_bucket(
                 &subscriber_interface,
                 &subscriber_state.qdisc_handle,
                 params,
                 &log,
             )
-            .await
+            .await?;
         }
     }
+
+    update_current_policy(db_pool, target, policy.policy_id, log).await?;
+    Ok(())
 }
 
 async fn delete_forwarding_reject_rule(
