@@ -197,7 +197,7 @@ async fn query_balance(
     slog::debug!(log, "Querying for balance"; "ip" => ip.to_string());
 
     let balance_state_query = r#"
-        SELECT "ip", "internal_uid" AS "subscriber_id", "data_balance", "bridged"
+        SELECT "internal_uid" AS "subscriber_id", "data_balance"
         FROM subscribers
         INNER JOIN static_ips ON static_ips.imsi = subscribers.imsi
         WHERE static_ips.ip = $1
@@ -231,9 +231,8 @@ async fn update_balance(
     let subscriber_update_query = r#"
         UPDATE subscribers
         SET "data_balance" = "data_balance" + $1
-        FROM static_ips
-        WHERE static_ips.imsi = subscribers.imsi AND "internal_uid" = $2
-        RETURNING "ip", "internal_uid" AS "subscriber_id", "data_balance", "bridged";
+        WHERE "internal_uid" = $2
+        RETURNING "internal_uid" AS "subscriber_id", "data_balance";
     "#;
 
     let rows: Vec<SubscriberBalanceInfo> = sqlx::query_as(subscriber_update_query)
@@ -255,9 +254,8 @@ async fn update_balance(
         let update_zero_floor_query = r#"
             UPDATE subscribers
             SET "data_balance" = 0
-            FROM static_ips
-            WHERE static_ips.imsi = subscribers.imsi AND "internal_uid" = $1
-            RETURNING "ip", "internal_uid" AS "subscriber_id", "data_balance", "bridged";
+            WHERE "internal_uid" = $1
+            RETURNING "internal_uid" AS "subscriber_id", "data_balance";
         "#;
 
         let rows: Vec<SubscriberBalanceInfo> = sqlx::query_as(update_zero_floor_query)
@@ -279,8 +277,6 @@ async fn update_balance(
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct SubscriberBalanceInfo {
-    ip: ipnetwork::IpNetwork,
     subscriber_id: i32,
     data_balance: i64,
-    bridged: bool,
 }
