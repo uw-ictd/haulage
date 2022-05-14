@@ -83,7 +83,7 @@ impl Iptables {
 }
 
 pub enum SubscriberCondition {
-    PositiveBalance,
+    _PositiveBalance,
     NoBalance,
 }
 
@@ -898,7 +898,7 @@ async fn query_subscriber_access_policy(
 ) -> Result<SubscriberAccessInfo, EnforcementError> {
     slog::debug!(log, "querying subscriber access policy");
     let ratelimit_state_query = match condition {
-        SubscriberCondition::PositiveBalance => {
+        SubscriberCondition::_PositiveBalance => {
             r#"
                 SELECT "internal_uid" AS "subscriber_id", "access_policies"."id" AS "policy_id", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
                 FROM subscribers
@@ -1092,8 +1092,8 @@ struct SubscriberAccessInfo {
     ip: ipnetwork::IpNetwork,
     subscriber_id: i32,
     policy_id: i32,
-    local_ul_policy: AccessPolicy,
-    local_dl_policy: AccessPolicy,
+    _local_ul_policy: AccessPolicy,
+    _local_dl_policy: AccessPolicy,
     backhaul_ul_policy: AccessPolicy,
     backhaul_dl_policy: AccessPolicy,
 }
@@ -1125,11 +1125,11 @@ impl TryFrom<&SubscriberAccessPolicyRow> for SubscriberAccessInfo {
             ip: row.ip,
             subscriber_id: row.subscriber_id,
             policy_id: row.policy_id,
-            local_ul_policy: create_policy_from_parameters(
+            _local_ul_policy: create_policy_from_parameters(
                 row.local_ul_policy_kind,
                 &row.local_ul_policy_parameters,
             )?,
-            local_dl_policy: create_policy_from_parameters(
+            _local_dl_policy: create_policy_from_parameters(
                 row.local_dl_policy_kind,
                 &row.local_dl_policy_parameters,
             )?,
