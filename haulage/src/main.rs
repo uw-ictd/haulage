@@ -396,8 +396,16 @@ async fn main() {
                 let packet_kind = match interface.mac {
                     Some(_) => PacketKind::Ethernet(packet_data_copy),
                     None => {
-                        // TODO Distinguish between IPv4 and IPv6... maybe by checking the checksums?
-                        PacketKind::IPv4(packet_data_copy)
+                        // Distinguish between IPv4 and IPv6 by checking the IP
+                        // version nybl. Could be brittle to non-ip payloads.
+                        match packet[0] & 0x0F {
+                            0x4 => PacketKind::IPv4(packet_data_copy),
+                            0x6 => PacketKind::IPv6(packet_data_copy),
+                            value => {
+                                slog::error!(packet_log, "Invalid IP version parsed"; "version"=> value);
+                                continue;
+                            }
+                        }
                     }
                 };
 
