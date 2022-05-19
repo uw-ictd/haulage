@@ -27,6 +27,9 @@ pub enum EnforcementError {
     SerdeJsonError(#[from] serde_json::Error),
 }
 
+const BASE_HTB_RATE_KIBITPS: u32 = 100;
+const BASE_HTB_RATE_STR: &str = "100kbit";
+
 #[derive(Debug)]
 pub struct Iptables {
     dispatch_channel: tokio::sync::mpsc::Sender<PolicyUpdateMessage>,
@@ -578,7 +581,7 @@ async fn setup_subscriber_class(
             &format!("{:X}:{}", id_offset + 1, sub_handle_fragment),
             "htb",
             "rate",
-            "100kbits",
+            BASE_HTB_RATE_STR,
         ])
         .status()
         .await?;
@@ -637,7 +640,7 @@ async fn setup_fallback_class(
             &format!("{:X}:0xFFFF", id_offset + 1),
             "htb",
             "rate",
-            "100kbps",
+            BASE_HTB_RATE_STR,
             "ceil",
             "1gbps",
         ])
@@ -714,7 +717,7 @@ async fn clear_user_limit(
             &format!("{:X}:{}", id_offset + 1, sub_handle),
             "htb",
             "rate",
-            "100kbps",
+            BASE_HTB_RATE_STR,
             "ceil",
             "1gbps",
         ])
@@ -748,7 +751,10 @@ async fn set_user_token_bucket(
             &format!("{:X}:{}", id_offset + 1, sub_handle),
             "htb",
             "rate",
-            &format!("{}kbit", params.rate_kibps),
+            &format!(
+                "{}kbit",
+                std::cmp::min(params.rate_kibps, BASE_HTB_RATE_KIBITPS)
+            ),
             "ceil",
             &format!("{}kbit", params.rate_kibps),
         ])
