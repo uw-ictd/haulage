@@ -539,7 +539,7 @@ async fn setup_root_qdisc(
     let add_status = tokio::process::Command::new("tc")
         .args(&[
             "qdisc",
-            "replace",
+            "add",
             "dev",
             iface,
             "parent",
@@ -552,7 +552,7 @@ async fn setup_root_qdisc(
         .await?;
 
     if !add_status.success() {
-        slog::warn!(log, "qdisc replace root with qfq failed");
+        slog::warn!(log, "qdisc add root with qfq failed");
     }
 
     Ok(())
