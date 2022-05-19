@@ -114,7 +114,7 @@ async fn enforce_via_iptables(
         .await
         .unwrap();
 
-    // Setup the root QFQ qdisc
+    // Setup the root qdisc
     setup_root_qdisc(&subscriber_interface, 0, &log)
         .await
         .unwrap();
@@ -162,7 +162,7 @@ async fn enforce_via_iptables(
             }
         };
 
-        // Setup subscriber qfq class
+        // Setup subscriber class
         setup_subscriber_class(
             &subscriber_interface,
             0,
@@ -177,7 +177,7 @@ async fn enforce_via_iptables(
             .unwrap();
 
         if upstream_interface.is_some() {
-            // Setup subscriber qfq class
+            // Setup subscriber class
             setup_subscriber_class(
                 upstream_interface.as_ref().unwrap(),
                 8,
@@ -546,13 +546,13 @@ async fn setup_root_qdisc(
             "root",
             "handle",
             &format!("{:X}:", id_offset + 1),
-            "qfq",
+            "htb",
         ])
         .status()
         .await?;
 
     if !add_status.success() {
-        slog::warn!(log, "qdisc add root with qfq failed");
+        slog::warn!(log, "qdisc add root with htb failed");
     }
 
     Ok(())
@@ -576,15 +576,15 @@ async fn setup_subscriber_class(
             &format!("{:X}:", id_offset + 1),
             "classid",
             &format!("{:X}:{}", id_offset + 1, sub_handle_fragment),
-            "qfq",
-            "weight",
-            "10",
+            "htb",
+            "rate",
+            "100kbits",
         ])
         .status()
         .await?;
 
     if !add_status.success() {
-        slog::warn!(log, "qfq add subscriber class failed");
+        slog::warn!(log, "htb add subscriber class failed");
     }
 
     let add_status = tokio::process::Command::new("tc")
@@ -597,13 +597,22 @@ async fn setup_subscriber_class(
             &format!("{:X}:{}", id_offset + 1, sub_handle_fragment),
             "handle",
             &format!("{:X}{}:", id_offset + 6, sub_handle_fragment),
-            "pfifo",
+            "sfq",
+            "perturb",
+            "30",
+            "headdrop",
+            "probability",
+            "0.5",
+            "redflowlimit",
+            "20000",
+            "ecn",
+            "harddrop",
         ])
         .status()
         .await?;
 
     if !add_status.success() {
-        slog::warn!(log, "qdisc add temporary user qdisc failed");
+        slog::warn!(log, "qdisc add sub sfq failed");
     }
 
     Ok(())
@@ -626,15 +635,17 @@ async fn setup_fallback_class(
             &format!("{:X}:", id_offset + 1),
             "classid",
             &format!("{:X}:0xFFFF", id_offset + 1),
-            "qfq",
-            "weight",
-            "10",
+            "htb",
+            "rate",
+            "100kbps",
+            "ceil",
+            "1gbps",
         ])
         .status()
         .await?;
 
     if !add_status.success() {
-        slog::warn!(log, "qfq add default class failed");
+        slog::warn!(log, "htb add default class failed");
     }
 
     slog::debug!(log, "adding catchall_filter"; "interface" => iface);
@@ -691,47 +702,26 @@ async fn clear_user_limit(
 ) -> Result<(), EnforcementError> {
     slog::debug!(log, "clearing limit"; "interface" => iface, "sub_handle" => sub_handle);
 
-    let del_status = tokio::process::Command::new("tc")
+    let change_status = tokio::process::Command::new("tc")
         .args(&[
-            "qdisc",
-            "del",
+            "class",
+            "change",
             "dev",
             iface,
             "parent",
+            &format!("{:X}:", id_offset + 1),
+            "classid",
             &format!("{:X}:{}", id_offset + 1, sub_handle),
+            "htb",
+            "rate",
+            "100kbps",
+            "ceil",
+            "1gbps",
         ])
         .status()
         .await?;
-    if !del_status.success() {
-        slog::warn!(log, "qdisc delete existing user qdisc failed");
-    }
-
-    let add_status = tokio::process::Command::new("tc")
-        .args(&[
-            "qdisc",
-            "add",
-            "dev",
-            iface,
-            "parent",
-            &format!("{:X}:{}", id_offset + 1, sub_handle),
-            "handle",
-            &format!("{:X}{}:", id_offset + 6, sub_handle),
-            "sfq",
-            "perturb",
-            "30",
-            "headdrop",
-            "probability",
-            "0.5",
-            "redflowlimit",
-            "20000",
-            "ecn",
-            "harddrop",
-        ])
-        .status()
-        .await?;
-
-    if !add_status.success() {
-        slog::warn!(log, "qdisc add basic sfq failed");
+    if !change_status.success() {
+        slog::warn!(log, "htb class change rate limit to 1gbps failed");
     }
 
     Ok(())
@@ -746,79 +736,26 @@ async fn set_user_token_bucket(
 ) -> Result<(), EnforcementError> {
     slog::debug!(log, "setting token bucket limit"; "interface" => iface, "sub_handle" => sub_handle);
 
-    let del_status = tokio::process::Command::new("tc")
+    let change_status = tokio::process::Command::new("tc")
         .args(&[
-            "qdisc",
-            "del",
+            "class",
+            "change",
             "dev",
             iface,
             "parent",
+            &format!("{:X}:", id_offset + 1),
+            "classid",
             &format!("{:X}:{}", id_offset + 1, sub_handle),
-        ])
-        .status()
-        .await?;
-    if !del_status.success() {
-        slog::warn!(log, "qdisc delete existing user qdisc failed");
-    }
-
-    // For now set common-sense defaults within haulage. Derive the burst size
-    // from the rate. Set a max latency of 20ms, although it should not matter
-    // since we are overriding the internal TBF queue with SFQ. Set the max
-    // burst to 20ms worth of data, or at least 2kB
-
-    let burst_size_kbit = std::cmp::max(16, ((params.rate_kibps as f64) / 50.0) as u32);
-
-    let add_status = tokio::process::Command::new("tc")
-        .args(&[
-            "qdisc",
-            "add",
-            "dev",
-            iface,
-            "parent",
-            &format!("{:X}:{}", id_offset + 1, sub_handle),
-            "handle",
-            &format!("{:X}{}:", id_offset + 2, sub_handle),
-            "tbf",
+            "htb",
             "rate",
             &format!("{}kbit", params.rate_kibps),
-            "burst",
-            &format!("{}kbit", burst_size_kbit),
-            "latency",
-            "20ms",
+            "ceil",
+            &format!("{}kbit", params.rate_kibps),
         ])
         .status()
         .await?;
-
-    if !add_status.success() {
-        slog::warn!(log, "qdisc add with first level tbf failed");
-    }
-
-    let add_status = tokio::process::Command::new("tc")
-        .args(&[
-            "qdisc",
-            "add",
-            "dev",
-            iface,
-            "parent",
-            &format!("{:X}{}:", id_offset + 2, sub_handle),
-            "handle",
-            &format!("{:X}{}:", id_offset + 6, sub_handle),
-            "sfq",
-            "perturb",
-            "30",
-            "headdrop",
-            "probability",
-            "0.5",
-            "redflowlimit",
-            "20000",
-            "ecn",
-            "harddrop",
-        ])
-        .status()
-        .await?;
-
-    if !add_status.success() {
-        slog::warn!(log, "qdisc add second level sfq failed");
+    if !change_status.success() {
+        slog::warn!(log, "htb class change rate limit failed");
     }
 
     Ok(())
