@@ -56,7 +56,9 @@ mod config {
         pub flow_log_interval: std::time::Duration,
         #[serde(with = "humantime_serde")]
         pub user_log_interval: std::time::Duration,
-        pub interface: String,
+        pub interface: Option<String>,
+        pub subscriber_interface: Option<String>,
+        pub upstream_interface: Option<String>,
         pub user_subnet: String,
         pub ignored_user_addresses: Vec<String>,
         pub custom: V1Custom,
@@ -84,7 +86,8 @@ mod config {
         pub flow_log_interval: std::time::Duration,
         pub user_log_interval: std::time::Duration,
         pub reenable_poll_interval: std::time::Duration,
-        pub interface: String,
+        pub subscriber_interface: String,
+        pub upstream_interface: Option<String>,
         pub user_subnet: ipnetwork::IpNetwork,
         pub ignored_user_addresses: std::collections::HashSet<std::net::IpAddr>,
     }
@@ -138,6 +141,29 @@ async fn main() {
             let parsed_config: config::V1 =
                 serde_yaml::from_str(&config_string).expect("Failed to parse config");
             slog::debug!(root_log, "Parsed config {:?}", parsed_config);
+
+            // Handle interface backwards compatibility.
+            let subscriber_interface = match parsed_config.interface {
+                Some(interface) => {
+                    slog::warn!(root_log, "The 'interface' config parameter is deprecated");
+                    if parsed_config.subscriber_interface.is_some() {
+                        slog::error!(root_log, "Cannot configure 'interface' and 'subscriberInterface' at the same time");
+                        panic!("Invalid configuration!");
+                    }
+                    interface
+                }
+                None => {
+                    if parsed_config.subscriber_interface.is_none() {
+                        slog::error!(root_log, "No 'subscriberInterface' supplied");
+                        panic!("Invalid configuration!");
+                    }
+                    parsed_config.subscriber_interface.unwrap()
+                }
+            };
+            if parsed_config.upstream_interface.is_none() {
+                slog::warn!(root_log, "No 'upstreamInterface' configured, but will be required in a future version of haulage");
+            }
+
             config::Internal {
                 db_name: parsed_config.custom.db_location,
                 db_user: parsed_config.custom.db_user,
@@ -146,7 +172,8 @@ async fn main() {
                 flow_log_interval: parsed_config.flow_log_interval,
                 user_log_interval: parsed_config.user_log_interval,
                 reenable_poll_interval: parsed_config.custom.reenable_poll_interval,
-                interface: parsed_config.interface,
+                subscriber_interface: subscriber_interface,
+                upstream_interface: parsed_config.upstream_interface,
                 user_subnet: ipnetwork::IpNetwork::from_str(&parsed_config.user_subnet).unwrap(),
                 ignored_user_addresses: HashSet::from_iter(
                     parsed_config.ignored_user_addresses.iter().map(|a| {
@@ -308,6 +335,8 @@ async fn main() {
     // Create the main user aggregation, accounting, and enforcement subsystems.
     let user_enforcer = enforcer::Iptables::new(
         config.reenable_poll_interval,
+        &config.subscriber_interface,
+        &config.upstream_interface,
         std::sync::Arc::clone(&db_pool),
         root_log.new(o!("subsystem" => "user_enforcer")),
     );
@@ -328,7 +357,7 @@ async fn main() {
 
     // This is a lambda closure to do a match in the filter function! Cool...
     let interface_name_match =
-        |iface: &pnet_datalink::NetworkInterface| iface.name == config.interface;
+        |iface: &pnet_datalink::NetworkInterface| iface.name == config.subscriber_interface;
 
     let interface = pnet_datalink::interfaces()
         .into_iter()
@@ -338,7 +367,7 @@ async fn main() {
             slog::error!(
                 root_log,
                 "Unable to find configured interface {}",
-                config.interface
+                config.subscriber_interface
             );
             panic!("No listenable interface found");
         });
@@ -367,8 +396,16 @@ async fn main() {
                 let packet_kind = match interface.mac {
                     Some(_) => PacketKind::Ethernet(packet_data_copy),
                     None => {
-                        // TODO Distinguish between IPv4 and IPv6... maybe by checking the checksums?
-                        PacketKind::IPv4(packet_data_copy)
+                        // Distinguish between IPv4 and IPv6 by checking the IP
+                        // version nybl. Could be brittle to non-ip payloads.
+                        match packet[0] & 0x0F {
+                            0x4 => PacketKind::IPv4(packet_data_copy),
+                            0x6 => PacketKind::IPv6(packet_data_copy),
+                            value => {
+                                slog::error!(packet_log, "Invalid IP version parsed"; "version"=> value);
+                                continue;
+                            }
+                        }
                     }
                 };
 

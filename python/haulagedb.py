@@ -53,21 +53,45 @@ if command == "add":
     # TODO: error-handling? Check if imsi/msisdn/ip already in system?
     print("haulagedb: adding user " + str(imsi))
 
-    cursor.execute("BEGIN TRANSACTION")
+    cursor.execute("BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE")
 
     cursor.execute(
         """
-        INSERT INTO subscribers (imsi)
-        VALUES
-        (%s)
-        """,
-        [imsi],
+        SELECT "id"
+        FROM access_policies
+        WHERE access_policies."name"='Local Only'
+        """
     )
 
-    commit_str = (
-        "INSERT INTO static_ips (imsi, ip) VALUES ('" + imsi + "', '" + ip + "')"
+    local_only_id = cursor.fetchone()[0]
+
+    cursor.execute(
+        """
+        SELECT "id"
+        FROM access_policies
+        WHERE access_policies."name"='Unlimited';
+        """
     )
-    cursor.execute(commit_str)
+
+    unlimited_id = cursor.fetchone()[0]
+
+    cursor.execute(
+        """
+        INSERT INTO subscribers (imsi, positive_balance_policy, zero_balance_policy, current_policy)
+        VALUES
+        (%s,%s,%s,%s)
+        """,
+        [imsi, unlimited_id, local_only_id, local_only_id],
+    )
+
+    cursor.execute(
+        """
+        INSERT INTO static_ips (imsi, ip)
+        VALUES
+        (%s,%s)
+        """,
+        [imsi, ip],
+    )
 
     cursor.execute("COMMIT")
 

@@ -16,10 +16,6 @@ jobs:
     name: Rust lint and format
     runs-on: ubuntu-latest
     steps:
-      - name: Install apt build dependencies
-        run: |
-          sudo apt-get -y install libsystemd-dev
-
       - name: Checkout repo
         uses: actions/checkout@v2
         with:
@@ -45,10 +41,6 @@ jobs:
     name: Run cargo unit tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install apt build dependencies
-        run: |
-          sudo apt-get -y install libsystemd-dev
-
       - name: Checkout repo
         uses: actions/checkout@v2
         with:
@@ -80,7 +72,7 @@ jobs:
 
       - name: Install apt dependencies
         run: |
-          sudo apt-get -y install libsystemd-dev curl
+          sudo apt-get update && sudo apt-get -y install curl
 
       - name: Run makefile
         run: |

@@ -3,7 +3,6 @@ use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct AsyncAggregator {
-    dispatch_handle: tokio::task::JoinHandle<()>,
     dispatch_channel: tokio::sync::mpsc::Sender<Message>,
 }
 impl AsyncAggregator {
@@ -16,11 +15,10 @@ impl AsyncAggregator {
         T: Reporter + Send + Sync + Clone + 'static,
     {
         let (sender, receiver) = tokio::sync::mpsc::channel(64);
-        let dispatch_handle = tokio::task::spawn(async move {
+        tokio::task::spawn(async move {
             aggregate_dispatcher::<T>(receiver, period, db_pool, log).await;
         });
         AsyncAggregator {
-            dispatch_handle: dispatch_handle,
             dispatch_channel: sender,
         }
     }
