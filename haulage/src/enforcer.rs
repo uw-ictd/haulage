@@ -497,11 +497,18 @@ async fn clear_interface_limit(iface: &str, log: &slog::Logger) -> Result<(), En
         std::str::from_utf8(&current_iface_status.stdout).unwrap(),
     );
     let current_iface_qdiscs: Vec<QDiscInfo> = serde_json::from_str(&current_iface_status)?;
-    if current_iface_qdiscs.len() == 1 {
-        if current_iface_qdiscs.first().unwrap().handle == "0:" {
-            slog::info!(log, "only default qdisc present, nothing to clear"; "interface" => iface);
-            return Ok(());
+
+    let mut found_child = false;
+    for qdisc in current_iface_qdiscs {
+        if qdisc.handle != "0:" {
+            found_child = true;
+            break;
         }
+    }
+
+    if !found_child {
+        slog::info!(log, "only default qdisc present, nothing to clear"; "interface" => iface);
+        return Ok(());
     }
 
     slog::warn!(log, "clearing non-trivial qdisc config");
