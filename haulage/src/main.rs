@@ -398,7 +398,7 @@ async fn main() {
                     None => {
                         // Distinguish between IPv4 and IPv6 by checking the IP
                         // version nybl. Could be brittle to non-ip payloads.
-                        match packet[0] & 0x0F {
+                        match (packet[0] & 0xF0) >> 4 {
                             0x4 => PacketKind::IPv4(packet_data_copy),
                             0x6 => PacketKind::IPv6(packet_data_copy),
                             value => {
