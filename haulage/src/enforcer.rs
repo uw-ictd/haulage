@@ -30,6 +30,7 @@ pub enum EnforcementError {
 const BASE_HTB_RATE_KIBITPS: u32 = 100;
 const BASE_HTB_RATE_STR: &str = "100kbit";
 const FULL_INTERFACE_HTB_RATE_STR: &str = "1gbps";
+const HTB_CBURST_AMOUNT_STR: &str = "1mbit";
 
 #[derive(Debug)]
 pub struct Iptables {
@@ -572,6 +573,12 @@ async fn setup_root_qdisc(
             "htb",
             "rate",
             FULL_INTERFACE_HTB_RATE_STR,
+            "burst",
+            HTB_CBURST_AMOUNT_STR,
+            "ceil",
+            FULL_INTERFACE_HTB_RATE_STR,
+            "cburst",
+            HTB_CBURST_AMOUNT_STR,
         ])
         .status()
         .await?;
@@ -665,6 +672,8 @@ async fn setup_fallback_class(
             BASE_HTB_RATE_STR,
             "ceil",
             FULL_INTERFACE_HTB_RATE_STR,
+            "cburst",
+            HTB_CBURST_AMOUNT_STR,
         ])
         .status()
         .await?;
@@ -741,7 +750,9 @@ async fn clear_user_limit(
             "rate",
             BASE_HTB_RATE_STR,
             "ceil",
-            "1gbps",
+            FULL_INTERFACE_HTB_RATE_STR,
+            "cburst",
+            HTB_CBURST_AMOUNT_STR,
         ])
         .status()
         .await?;
@@ -779,6 +790,8 @@ async fn set_user_token_bucket(
             ),
             "ceil",
             &format!("{}kbit", params.rate_kibps),
+            "cburst",
+            HTB_CBURST_AMOUNT_STR,
         ])
         .status()
         .await?;
