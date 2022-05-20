@@ -29,6 +29,7 @@ pub enum EnforcementError {
 
 const BASE_HTB_RATE_KIBITPS: u32 = 100;
 const BASE_HTB_RATE_STR: &str = "100kbit";
+const FULL_INTERFACE_HTB_RATE_STR: &str = "1gbps";
 
 #[derive(Debug)]
 pub struct Iptables {
@@ -558,6 +559,27 @@ async fn setup_root_qdisc(
         slog::warn!(log, "qdisc add root with htb failed");
     }
 
+    let add_status = tokio::process::Command::new("tc")
+        .args(&[
+            "class",
+            "add",
+            "dev",
+            iface,
+            "parent",
+            &format!("{:X}:", id_offset + 1),
+            "classid",
+            &format!("{:X}:0x{}000", id_offset + 1, 1),
+            "htb",
+            "rate",
+            FULL_INTERFACE_HTB_RATE_STR,
+        ])
+        .status()
+        .await?;
+
+    if !add_status.success() {
+        slog::warn!(log, "htb add subscriber class failed");
+    }
+
     Ok(())
 }
 
@@ -576,9 +598,9 @@ async fn setup_subscriber_class(
             "dev",
             iface,
             "parent",
-            &format!("{:X}:", id_offset + 1),
+            &format!("{:X}:0x{}000", id_offset + 1, 1),
             "classid",
-            &format!("{:X}:{}", id_offset + 1, sub_handle_fragment),
+            &format!("{:X}:0x{}{}", id_offset + 1, 2, sub_handle_fragment),
             "htb",
             "rate",
             BASE_HTB_RATE_STR,
@@ -597,7 +619,7 @@ async fn setup_subscriber_class(
             "dev",
             iface,
             "parent",
-            &format!("{:X}:{}", id_offset + 1, sub_handle_fragment),
+            &format!("{:X}:0x{}{}", id_offset + 1, 2, sub_handle_fragment),
             "handle",
             &format!("{:X}{}:", id_offset + 6, sub_handle_fragment),
             "sfq",
@@ -635,14 +657,14 @@ async fn setup_fallback_class(
             "dev",
             iface,
             "parent",
-            &format!("{:X}:", id_offset + 1),
+            &format!("{:X}:0x{}000", id_offset + 1, 1),
             "classid",
             &format!("{:X}:0xFFFF", id_offset + 1),
             "htb",
             "rate",
             BASE_HTB_RATE_STR,
             "ceil",
-            "1gbps",
+            FULL_INTERFACE_HTB_RATE_STR,
         ])
         .status()
         .await?;
@@ -712,9 +734,9 @@ async fn clear_user_limit(
             "dev",
             iface,
             "parent",
-            &format!("{:X}:", id_offset + 1),
+            &format!("{:X}:0x{}000", id_offset + 1, 1),
             "classid",
-            &format!("{:X}:{}", id_offset + 1, sub_handle),
+            &format!("{:X}:0x{}{}", id_offset + 1, 2, sub_handle),
             "htb",
             "rate",
             BASE_HTB_RATE_STR,
@@ -746,9 +768,9 @@ async fn set_user_token_bucket(
             "dev",
             iface,
             "parent",
-            &format!("{:X}:", id_offset + 1),
+            &format!("{:X}:0x{}000", id_offset + 1, 1),
             "classid",
-            &format!("{:X}:{}", id_offset + 1, sub_handle),
+            &format!("{:X}:0x{}{}", id_offset + 1, 2, sub_handle),
             "htb",
             "rate",
             &format!(
@@ -794,7 +816,7 @@ async fn add_subscriber_dst_filter(
             "dst",
             &sub.ip.to_string(),
             "flowid",
-            &format!("{:X}:{}", id_offset + 1, &sub.qdisc_handle),
+            &format!("{:X}:0x{}{}", id_offset + 1, 2, &sub.qdisc_handle),
         ])
         .status()
         .await?;
@@ -834,7 +856,7 @@ async fn add_subscriber_src_filter(
             "src",
             &sub.ip.to_string(),
             "flowid",
-            &format!("{:X}:{}", id_offset + 1, &sub.qdisc_handle),
+            &format!("{:X}:0x{}{}", id_offset + 1, 2, &sub.qdisc_handle),
         ])
         .status()
         .await?;
