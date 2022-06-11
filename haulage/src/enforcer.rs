@@ -952,7 +952,7 @@ async fn query_subscriber_access_policy(
                 SELECT "internal_uid" AS "subscriber_id", "access_policies"."id" AS "policy_id", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
                 FROM subscribers
                 INNER JOIN access_policies ON subscribers.positive_balance_policy = access_policies.id
-                WHERE (subscriber_id = $1)
+                WHERE (internal_uid = $1)
             "#
         }
         SubscriberCondition::NoBalance => {
@@ -960,7 +960,7 @@ async fn query_subscriber_access_policy(
                 SELECT "internal_uid" AS "subscriber_id", "access_policies"."id" AS "policy_id", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
                 FROM subscribers
                 INNER JOIN access_policies ON subscribers.zero_balance_policy = access_policies.id
-                WHERE (subscriber_id = $1)
+                WHERE (internal_uid = $1)
             "#
         }
     };
