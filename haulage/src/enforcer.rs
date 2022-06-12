@@ -182,24 +182,35 @@ async fn enforce_via_iptables(
             .unwrap();
 
         if upstream_interface.is_some() {
+            let id_offset = 8;
             // Setup subscriber class
             setup_subscriber_class(
                 upstream_interface.as_ref().unwrap(),
-                8,
+                id_offset,
                 &sub_limit_state.qdisc_handle,
                 &log,
             )
             .await
             .unwrap();
 
-            add_subscriber_src_filter(
+            add_subscriber_mark_filter(
                 upstream_interface.as_ref().unwrap(),
-                8,
+                id_offset,
                 &sub_limit_state,
                 &log,
             )
             .await
             .unwrap();
+
+            let mark_string = format!("0x{:X}{}", id_offset + 2, &sub_limit_state.qdisc_handle);
+            if !mark_rule_present(&sub_limit_state.ip.ip(), &mark_string)
+                .await
+                .unwrap()
+            {
+                set_mark_rule(&sub_limit_state.ip.ip(), &mark_string, &log)
+                    .await
+                    .unwrap();
+            }
         }
 
         set_policy(
@@ -294,6 +305,28 @@ async fn forwarding_reject_rule_present(addr: &std::net::IpAddr) -> Result<bool,
 
     Ok(output.status.success())
 }
+async fn mark_rule_present(
+    addr: &std::net::IpAddr,
+    mark_string: &str,
+) -> Result<bool, std::io::Error> {
+    // IPTables holds state outside the lifetime of this program. The `-C`
+    // option will return success if the rule is present, and 1 if it is not.
+    let output = tokio::process::Command::new("iptables")
+        .args(&[
+            "-C",
+            "FORWARD",
+            "-s",
+            &addr.to_string(),
+            "-j",
+            "MARK",
+            "--set-mark",
+            mark_string,
+        ])
+        .output()
+        .await?;
+
+    Ok(output.status.success())
+}
 async fn set_policy_for_condition(
     target: UserId,
     subscriber_state: &SubscriberControlState,
@@ -345,6 +378,17 @@ async fn set_policy(
             // Partially implemented-- currently no difference between
             // uplink and downlink block/allow policies, so set/unset
             // forwarding as part of the downlink policy only.
+            match &upstream_interface {
+                None => {
+                    slog::warn!(
+                        log,
+                        "No 'upstreamInterface' configured, not modifying htb qdisc for block rate limit policy!"
+                    );
+                }
+                Some(upstream_if) => {
+                    clear_user_limit(upstream_if, 8, &subscriber_state.qdisc_handle, &log).await?;
+                }
+            };
         }
         AccessPolicy::TokenBucket(params) => {
             match &upstream_interface {
@@ -382,6 +426,13 @@ async fn set_policy(
         }
         AccessPolicy::Block => {
             set_forwarding_reject_rule(&subscriber_state.ip.ip(), &log).await?;
+            clear_user_limit(
+                &subscriber_interface,
+                0,
+                &subscriber_state.qdisc_handle,
+                &log,
+            )
+            .await?;
         }
         AccessPolicy::TokenBucket(params) => {
             delete_forwarding_reject_rule(&subscriber_state.ip.ip(), &log).await?;
@@ -442,6 +493,39 @@ async fn set_forwarding_reject_rule(
 
     if !command_status.success() {
         slog::warn!(log, "iptables insert failed"; "ip" => ip.to_string());
+    }
+
+    Ok(())
+}
+
+async fn set_mark_rule(
+    ip: &std::net::IpAddr,
+    mark_string: &str,
+    log: &slog::Logger,
+) -> Result<(), EnforcementError> {
+    // Do not double insert, as this will require delete to run multiple times
+    // and break the delete implementation
+    if mark_rule_present(ip, mark_string).await? {
+        slog::info!(log, "Forwarding filter already present"; "ip" => ip.to_string());
+        return Ok(());
+    }
+
+    let command_status = tokio::process::Command::new("iptables")
+        .args(&[
+            "-I",
+            "FORWARD",
+            "-s",
+            &ip.to_string(),
+            "-j",
+            "MARK",
+            "--set-mark",
+            mark_string,
+        ])
+        .status()
+        .await?;
+
+    if !command_status.success() {
+        slog::warn!(log, "iptables mark insert failed"; "ip" => ip.to_string());
     }
 
     Ok(())
@@ -842,7 +926,7 @@ async fn add_subscriber_dst_filter(
 }
 
 // TODO(matt9j) heavily duplicated with add_subscriber_dst_filter
-async fn add_subscriber_src_filter(
+async fn add_subscriber_mark_filter(
     iface: &str,
     id_offset: u8,
     sub: &SubscriberControlState,
@@ -859,17 +943,13 @@ async fn add_subscriber_src_filter(
             iface,
             "parent",
             &format!("{:X}:", id_offset + 1),
-            "protocol",
-            "ip",
             "prio",
             "1",
-            "u32",
-            "match",
-            "ip",
-            "src",
-            &sub.ip.to_string(),
-            "flowid",
-            &format!("{:X}:0x{}{}", id_offset + 1, 2, &sub.qdisc_handle),
+            "handle",
+            &format!("0x{:X}{}", id_offset + 2, &sub.qdisc_handle),
+            "fw",
+            "classid",
+            &format!("0x{:X}:0x{}{}", id_offset + 1, 2, &sub.qdisc_handle),
         ])
         .status()
         .await?;
@@ -952,7 +1032,7 @@ async fn query_subscriber_access_policy(
                 SELECT "internal_uid" AS "subscriber_id", "access_policies"."id" AS "policy_id", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
                 FROM subscribers
                 INNER JOIN access_policies ON subscribers.positive_balance_policy = access_policies.id
-                WHERE (subscriber_id = $1)
+                WHERE (internal_uid = $1)
             "#
         }
         SubscriberCondition::NoBalance => {
@@ -960,7 +1040,7 @@ async fn query_subscriber_access_policy(
                 SELECT "internal_uid" AS "subscriber_id", "access_policies"."id" AS "policy_id", "local_ul_policy_kind", "local_ul_policy_parameters", "local_dl_policy_kind", "local_dl_policy_parameters", "backhaul_ul_policy_kind", "backhaul_ul_policy_parameters", "backhaul_dl_policy_kind", "backhaul_dl_policy_parameters"
                 FROM subscribers
                 INNER JOIN access_policies ON subscribers.zero_balance_policy = access_policies.id
-                WHERE (subscriber_id = $1)
+                WHERE (internal_uid = $1)
             "#
         }
     };
