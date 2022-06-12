@@ -361,6 +361,17 @@ async fn set_policy(
             // Partially implemented-- currently no difference between
             // uplink and downlink block/allow policies, so set/unset
             // forwarding as part of the downlink policy only.
+            match &upstream_interface {
+                None => {
+                    slog::warn!(
+                        log,
+                        "No 'upstreamInterface' configured, not modifying htb qdisc for block rate limit policy!"
+                    );
+                }
+                Some(upstream_if) => {
+                    clear_user_limit(upstream_if, 8, &subscriber_state.qdisc_handle, &log).await?;
+                }
+            };
         }
         AccessPolicy::TokenBucket(params) => {
             match &upstream_interface {
@@ -398,6 +409,13 @@ async fn set_policy(
         }
         AccessPolicy::Block => {
             set_forwarding_reject_rule(&subscriber_state.ip.ip(), &log).await?;
+            clear_user_limit(
+                &subscriber_interface,
+                0,
+                &subscriber_state.qdisc_handle,
+                &log,
+            )
+            .await?;
         }
         AccessPolicy::TokenBucket(params) => {
             delete_forwarding_reject_rule(&subscriber_state.ip.ip(), &log).await?;
