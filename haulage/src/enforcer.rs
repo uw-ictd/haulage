@@ -203,8 +203,13 @@ async fn enforce_via_iptables(
             .unwrap();
 
             let mark_string = format!("0x{:X}{}", id_offset + 2, &sub_limit_state.qdisc_handle);
-            if !mark_rule_present(&sub_limit_state.ip.ip(), &mark_string).await.unwrap() {
-                set_mark_rule(&sub_limit_state.ip.ip(), &mark_string, &log).await.unwrap();
+            if !mark_rule_present(&sub_limit_state.ip.ip(), &mark_string)
+                .await
+                .unwrap()
+            {
+                set_mark_rule(&sub_limit_state.ip.ip(), &mark_string, &log)
+                    .await
+                    .unwrap();
             }
         }
 
@@ -300,11 +305,23 @@ async fn forwarding_reject_rule_present(addr: &std::net::IpAddr) -> Result<bool,
 
     Ok(output.status.success())
 }
-async fn mark_rule_present(addr: &std::net::IpAddr, mark_string: &str) -> Result<bool, std::io::Error> {
+async fn mark_rule_present(
+    addr: &std::net::IpAddr,
+    mark_string: &str,
+) -> Result<bool, std::io::Error> {
     // IPTables holds state outside the lifetime of this program. The `-C`
     // option will return success if the rule is present, and 1 if it is not.
     let output = tokio::process::Command::new("iptables")
-        .args(&["-C", "FORWARD", "-s", &addr.to_string(), "-j", "MARK", "--set-mark", mark_string])
+        .args(&[
+            "-C",
+            "FORWARD",
+            "-s",
+            &addr.to_string(),
+            "-j",
+            "MARK",
+            "--set-mark",
+            mark_string,
+        ])
         .output()
         .await?;
 
@@ -494,7 +511,16 @@ async fn set_mark_rule(
     }
 
     let command_status = tokio::process::Command::new("iptables")
-        .args(&["-I", "FORWARD", "-s", &ip.to_string(), "-j", "MARK", "--set-mark", mark_string])
+        .args(&[
+            "-I",
+            "FORWARD",
+            "-s",
+            &ip.to_string(),
+            "-j",
+            "MARK",
+            "--set-mark",
+            mark_string,
+        ])
         .status()
         .await?;
 
