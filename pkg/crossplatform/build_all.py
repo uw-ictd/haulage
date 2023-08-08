@@ -15,7 +15,7 @@ import os
 import shutil
 import subprocess
 
-DISTRIBUTIONS = ["buster", "bionic", "focal", "bullseye"]
+DISTRIBUTIONS = ["buster", "bionic", "focal", "bullseye", "jammy"]
 
 
 def _setup_workspace(workspace_path):
